@@ -763,6 +763,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.env.DLPOCKET_SMOKE_TEST === '1') {
+    app.quit();
+    return;
+  }
+
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
 
   safeHandle('app:info', async () => {
@@ -876,4 +881,3 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-  active.action = 'cancelled';
