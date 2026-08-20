@@ -1,0 +1,62 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate tag and package version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}".TrimStart("v")
+          $packageVersion = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          if ($packageVersion -ne $tagVersion) {
+            throw "Tag $tagVersion difere do package.json $packageVersion"
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: npm ci
+
+      - name: Validate JavaScript
+        shell: pwsh
+        run: npm run check
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: npm run dist:win
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "dist/DLPocket-Setup-*.exe" | Select-Object -First 1
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content "dist/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "DLPocket $tag" --notes-file "RELEASE-$tag.md"
+          }
+          gh release upload $tag "dist/DLPocket-Setup-*.exe" "dist/SHA256SUMS.txt" --clobber

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DLPocket</title>
+  <link rel="icon" href="../../assets/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" role="img">
+            <rect x="4" y="4" width="40" height="40" rx="13"></rect>
+            <path d="M24 12v17m0 0-7-7m7 7 7-7"></path>
+            <path d="M14 35h20"></path>
+          </svg>
+        </div>
+        <div>
+          <h1>DLPocket</h1>
+          <p>Baixe mídia sem precisar abrir o terminal.</p>
+        </div>
+      </div>
+
+      <button id="open-base-folder" class="icon-button" type="button" title="Abrir pasta DLPocket" aria-label="Abrir pasta DLPocket">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5h6l2 2h10v8.5A2 2 0 0 1 19 20H5a2 2 0 0 1-2-2V7.5Z"></path><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h6"></path></svg>
+      </button>
+    </header>
+
+    <section class="card composer" aria-labelledby="download-heading">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Novo download</span>
+          <h2 id="download-heading">Cole o link</h2>
+        </div>
+        <div id="dependency-badge" class="status-badge is-checking">
+          <span class="status-dot"></span>
+          <span id="dependency-label">Verificando componentes…</span>
+        </div>
+      </div>
+
+      <label class="field-label" for="url-input">Link do vídeo ou mídia</label>
+      <div class="url-row">
+        <input id="url-input" class="url-input" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://www.youtube.com/watch?v=..." />
+        <button id="paste-button" class="secondary-button paste-button" type="button">Colar</button>
+      </div>
+      <p id="url-error" class="field-error" role="alert" aria-live="polite"></p>
+
+      <div class="choice-grid">
+        <fieldset class="choice-group">
+          <legend>O que deseja baixar?</legend>
+          <div class="segmented" id="kind-options">
+            <label class="segment is-selected">
+              <input type="radio" name="kind" value="video" checked />
+              <span class="segment-icon" aria-hidden="true">▶</span>
+              <span>Vídeo</span>
+            </label>
+            <label class="segment">
+              <input type="radio" name="kind" value="audio" />
+              <span class="segment-icon" aria-hidden="true">♪</span>
+              <span>Áudio</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="format-field">
+          <label class="field-label" for="format-select">Formato</label>
+          <div class="select-wrap">
+            <select id="format-select" aria-label="Formato de saída">
+              <option value="mp4">MP4</option>
+              <option value="mkv">MKV</option>
+              <option value="webm">WebM</option>
+            </select>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="destination-row">
+        <div>
+          <span class="destination-label">Destino</span>
+          <strong id="destination-path">Downloads\DLPocket\Vídeo</strong>
+        </div>
+        <button id="open-current-folder" class="text-button" type="button">Abrir pasta</button>
+      </div>
+
+      <button id="download-button" class="primary-button" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"></path><path d="M5 21h14"></path></svg>
+        <span>Baixar vídeo</span>
+      </button>
+
+      <div id="setup-panel" class="setup-panel" hidden>
+        <div>
+          <strong>Preparação inicial</strong>
+          <p id="setup-message">O DLPocket precisa preparar yt-dlp e FFmpeg uma única vez.</p>
+        </div>
+        <div class="setup-progress-track" aria-hidden="true"><div id="setup-progress-bar"></div></div>
+      </div>
+    </section>
+
+    <section class="card queue-card" aria-labelledby="queue-heading">
+      <div class="section-heading compact-heading">
+        <div>
+          <span class="eyebrow">Sessão atual</span>
+          <h2 id="queue-heading">Downloads</h2>
+        </div>
+        <span id="queue-count" class="muted-pill">0 itens</span>
+      </div>
+
+      <div id="empty-state" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3v11m0 0 4-4m-4 4-4-4"></path><path d="M5 18h14"></path></svg>
+        </div>
+        <strong>Nenhum download ainda</strong>
+        <p>Seus downloads desta sessão aparecerão aqui.</p>
+      </div>
+
+      <div id="download-list" class="download-list" aria-live="polite"></div>
+    </section>
+
+    <footer class="footer">
+      <span id="app-version">DLPocket</span>
+      <span>Powered by yt-dlp</span>
+    </footer>
+  </main>
+
+  <template id="download-item-template">
+    <article class="download-item">
+      <div class="download-icon" aria-hidden="true"></div>
+      <div class="download-content">
+        <div class="download-title-row">
+          <div class="download-title-wrap">
+            <strong class="download-title"></strong>
+            <span class="download-meta"></span>
+          </div>
+          <span class="download-percent">0%</span>
+        </div>
+        <div class="progress-track"><div class="progress-bar"></div></div>
+        <div class="download-status-row">
+          <span class="download-status">Iniciando…</span>
+          <button class="cancel-button" type="button">Cancelar</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

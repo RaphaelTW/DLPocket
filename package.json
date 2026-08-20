@@ -1,0 +1,67 @@
+{
+  "name": "dlpocket",
+  "version": "1.0.0",
+  "description": "Interface desktop simples e segura para yt-dlp, feita em Electron, para baixar vídeos e extrair áudio sem terminal.",
+  "main": "src/main.js",
+  "author": "Raphael Laurentino",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/renderer.js",
+    "pack:win": "electron-builder --win --x64 --dir",
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "26.15.7"
+  },
+  "build": {
+    "appId": "com.dlpocket.desktop",
+    "productName": "DLPocket",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "assets/icon.svg",
+      "assets/icon.ico",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "DLPocket-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "displayLanguageSelector": true,
+      "installerLanguages": [
+        "pt_BR",
+        "en_US",
+        "ru_RU"
+      ],
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DLPocket",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "productName": "DLPocket"
+}
