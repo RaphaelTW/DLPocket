@@ -139,6 +139,11 @@ O instalador usa o ícone oficial do DLPocket, permite escolher a pasta de insta
 e apresenta a licença MIT em português, inglês ou russo. A interface acompanha
 automaticamente o tema claro ou escuro configurado no Windows.
 
+Desde a v1.1.0, o DLPocket também verifica novas versões no GitHub. Quando uma
+atualização está disponível, o aplicativo pede confirmação, mostra o progresso do
+download e valida o SHA-256 antes de abrir o instalador salvo em
+`Downloads\DLPocket\Atualizações`.
+
 ## 📌 Versões fixadas na v1.0.0
 
 - Electron: `43.4.1`

@@ -4,7 +4,9 @@ const state = {
   preparing: false,
   kind: 'video',
   format: 'mp4',
-  downloads: new Map()
+  downloads: new Map(),
+  update: null,
+  updateFile: null
 };
 
 const formats = {
@@ -38,6 +40,13 @@ const downloadList = $('#download-list');
 const emptyState = $('#empty-state');
 const queueCount = $('#queue-count');
 const itemTemplate = $('#download-item-template');
+const updateCard = $('#update-card');
+const updateTitle = $('#update-title');
+const updateMessage = $('#update-message');
+const updateDownload = $('#update-download');
+const updateDismiss = $('#update-dismiss');
+const updateProgressTrack = updateCard.querySelector('.update-progress-track');
+const updateProgressBar = $('#update-progress-bar');
 
 function prettyKind(kind) {
   return kind === 'audio' ? 'Áudio' : 'Vídeo';
@@ -267,9 +276,58 @@ function handleDependencyEvent(event) {
   }
 }
 
+function handleUpdateEvent(event) {
+  if (event.type !== 'progress') return;
+  updateProgressTrack.hidden = false;
+  if (event.percent != null) updateProgressBar.style.width = `${event.percent}%`;
+  const size = event.total ? ` de ${(event.total / 1048576).toFixed(1)} MB` : '';
+  updateMessage.textContent = `Baixando: ${(event.received / 1048576).toFixed(1)} MB${size}`;
+}
+
+async function checkForUpdates() {
+  try {
+    const release = await window.dlpocket.checkForUpdates();
+    if (!release.available) return;
+    state.update = release;
+    updateTitle.textContent = `DLPocket v${release.version} disponível`;
+    updateMessage.textContent = `Você está usando a v${release.currentVersion}. Deseja baixar a nova versão?`;
+    updateCard.hidden = false;
+  } catch {
+    // A verificação é silenciosa para não interromper o uso offline.
+  }
+}
+
+async function downloadAvailableUpdate() {
+  if (state.updateFile) {
+    await window.dlpocket.openUpdate(state.updateFile);
+    return;
+  }
+  if (!state.update) return;
+  updateDownload.disabled = true;
+  updateDismiss.hidden = true;
+  updateDownload.textContent = 'Baixando…';
+  updateProgressTrack.hidden = false;
+  try {
+    const result = await window.dlpocket.downloadUpdate(state.update);
+    state.updateFile = result.filePath;
+    updateProgressBar.style.width = '100%';
+    updateTitle.textContent = 'Atualização pronta';
+    updateMessage.textContent = 'Download verificado. Abra o instalador para concluir a atualização.';
+    updateDownload.textContent = 'Abrir instalador';
+    updateDownload.disabled = false;
+  } catch (error) {
+    updateTitle.textContent = 'Falha na atualização';
+    updateMessage.textContent = error?.message || 'Não foi possível baixar a nova versão.';
+    updateDownload.textContent = 'Tentar novamente';
+    updateDownload.disabled = false;
+    updateDismiss.hidden = false;
+  }
+}
+
 async function init() {
   window.dlpocket.onDownloadEvent(handleDownloadEvent);
   window.dlpocket.onDependencyEvent(handleDependencyEvent);
+  window.dlpocket.onUpdateEvent(handleUpdateEvent);
 
   state.appInfo = await window.dlpocket.getAppInfo();
   $('#app-version').textContent = `DLPocket v${state.appInfo.version}`;
@@ -282,6 +340,7 @@ async function init() {
   } catch {
     setDependencyBadge('is-error', 'Status indisponível');
   }
+  setTimeout(checkForUpdates, 1200);
 }
 
 document.querySelectorAll('input[name="kind"]').forEach((input) => {
@@ -310,5 +369,7 @@ $('#paste-button').addEventListener('click', async () => {
 downloadButton.addEventListener('click', beginDownload);
 $('#open-base-folder').addEventListener('click', () => window.dlpocket.openDownloadsFolder('base'));
 $('#open-current-folder').addEventListener('click', () => window.dlpocket.openDownloadsFolder(selectedFolderKind()));
+updateDownload.addEventListener('click', downloadAvailableUpdate);
+updateDismiss.addEventListener('click', () => { updateCard.hidden = true; });
 
 init();

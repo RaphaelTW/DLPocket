@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('dlpocket', {
   startDownload: (options) => ipcRenderer.invoke('download:start', options),
   cancelDownload: (id) => ipcRenderer.invoke('download:cancel', id),
   openDownloadsFolder: (kind = 'base') => ipcRenderer.invoke('folder:open', kind),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: (release) => ipcRenderer.invoke('update:download', release),
+  openUpdate: (filePath) => ipcRenderer.invoke('update:open', filePath),
   onDownloadEvent: (callback) => subscribe('download:event', callback),
-  onDependencyEvent: (callback) => subscribe('deps:event', callback)
+  onDependencyEvent: (callback) => subscribe('deps:event', callback),
+  onUpdateEvent: (callback) => subscribe('update:event', callback)
 });

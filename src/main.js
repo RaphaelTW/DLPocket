@@ -1,14 +1,16 @@
-const { app, BrowserWindow, ipcMain, shell, session, net, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, net, clipboard, nativeTheme } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const { spawn } = require('node:child_process');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
+const readline = require('node:readline');
 const crypto = require('node:crypto');
 
 const APP_NAME = 'DLPocket';
 const PROJECT_FOLDER = 'DLPocket';
+const RELEASES_API = 'https://api.github.com/repos/RaphaelTW/DLPocket/releases/latest';
 const activeDownloads = new Map();
 let mainWindow = null;
 let preparingDependencies = null;
@@ -39,8 +41,75 @@ function getDownloadDirs() {
   return {
     base,
     video: path.join(base, 'Vídeo'),
-    audio: path.join(base, 'Áudio')
+    audio: path.join(base, 'Áudio'),
+    updates: path.join(base, 'Atualizações')
   };
+}
+
+function compareVersions(left, right) {
+  const normalize = (value) => String(value).replace(/^v/i, '').split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const a = normalize(left);
+  const b = normalize(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) > (b[index] || 0) ? 1 : -1;
+  }
+  return 0;
+}
+
+async function checkForUpdates() {
+  const response = await net.fetch(RELEASES_API, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `${APP_NAME}/${app.getVersion()}` }
+  });
+  if (!response.ok) throw new Error(`Não foi possível verificar atualizações (HTTP ${response.status}).`);
+  const release = await response.json();
+  const version = String(release.tag_name || '').replace(/^v/i, '');
+  const installer = release.assets?.find((asset) => /^DLPocket-Setup-.*\.exe$/i.test(asset.name));
+  const checksums = release.assets?.find((asset) => asset.name === 'SHA256SUMS.txt');
+  if (!version || !installer || !checksums) return { available: false, currentVersion: app.getVersion() };
+  return {
+    available: compareVersions(version, app.getVersion()) > 0,
+    currentVersion: app.getVersion(), version, name: installer.name,
+    downloadUrl: installer.browser_download_url,
+    checksumUrl: checksums.browser_download_url,
+    releaseUrl: release.html_url
+  };
+}
+
+async function downloadUpdate(_event, release) {
+  if (!release || typeof release !== 'object') throw new Error('Atualização inválida.');
+  const downloadUrl = new URL(release.downloadUrl);
+  const checksumUrl = new URL(release.checksumUrl);
+  if (downloadUrl.protocol !== 'https:' || checksumUrl.protocol !== 'https:' || downloadUrl.hostname !== 'github.com' || checksumUrl.hostname !== 'github.com') {
+    throw new Error('Origem da atualização não autorizada.');
+  }
+  const filename = path.basename(String(release.name || ''));
+  if (!/^DLPocket-Setup-[0-9.]+\.exe$/i.test(filename)) throw new Error('Nome do instalador inválido.');
+  const dirs = getDownloadDirs();
+  await fsp.mkdir(dirs.updates, { recursive: true });
+  const destination = path.join(dirs.updates, filename);
+  const checksumText = await fetchText(checksumUrl.toString(), 'checksum da atualização');
+  const expected = parseExpectedSha256(checksumText, filename);
+  const partial = `${destination}.part`;
+  await fsp.rm(partial, { force: true });
+  const response = await net.fetch(downloadUrl.toString(), { redirect: 'follow' });
+  if (!response.ok || !response.body) throw new Error(`Falha ao baixar a atualização (HTTP ${response.status}).`);
+  const total = Number(response.headers.get('content-length') || 0);
+  let received = 0;
+  const source = Readable.fromWeb(response.body);
+  source.on('data', (chunk) => {
+    received += chunk.length;
+    sendToRenderer('update:event', { type: 'progress', received, total, percent: total ? Math.round((received / total) * 100) : null });
+  });
+  await pipeline(source, fs.createWriteStream(partial));
+  const actual = await sha256File(partial);
+  if (actual !== expected) {
+    await fsp.rm(partial, { force: true });
+    throw new Error('A verificação SHA-256 da atualização falhou.');
+  }
+  await fsp.rm(destination, { force: true });
+  await fsp.rename(partial, destination);
+  sendToRenderer('update:event', { type: 'complete', filePath: destination });
+  return { filePath: destination };
 }
 
 async function ensureDownloadDirs() {
@@ -304,6 +373,8 @@ function buildYtDlpArgs({ url, kind, format, targetDir, deps }) {
   const args = [
     '--no-colors',
     '--newline',
+    '--progress',
+    '--progress-delta', '0.2',
     '--no-playlist',
     '--windows-filenames',
     '--trim-filenames', '180',
@@ -321,13 +392,13 @@ function buildYtDlpArgs({ url, kind, format, targetDir, deps }) {
     args.push(
       '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
       '--merge-output-format', 'mp4',
-      '--recode-video', 'mp4'
+      '--remux-video', 'mp4'
     );
   } else if (format === 'webm') {
     args.push(
       '-f', 'bv*[ext=webm]+ba[ext=webm]/b[ext=webm]/bv*+ba/b',
       '--merge-output-format', 'webm',
-      '--recode-video', 'webm'
+      '--remux-video', 'webm'
     );
   } else {
     args.push('-f', 'bv*+ba/b', '--merge-output-format', 'mkv', '--remux-video', 'mkv');
@@ -398,8 +469,8 @@ async function startDownload(event, payload) {
     }
   };
 
-  child.stdout.on('data', (chunk) => consume(chunk, false));
-  child.stderr.on('data', (chunk) => consume(chunk, true));
+  readline.createInterface({ input: child.stdout }).on('line', (line) => consume(`${line}\n`, false));
+  readline.createInterface({ input: child.stderr }).on('line', (line) => consume(`${line}\n`, true));
   child.on('error', (error) => {
     activeDownloads.delete(id);
     emit({ type: 'error', message: error.message });
@@ -447,7 +518,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 620,
     show: false,
-    backgroundColor: '#f5f6f8',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#111317' : '#f5f6f8',
     title: APP_NAME,
     icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
     webPreferences: {
@@ -486,6 +557,17 @@ app.whenReady().then(() => {
   safeHandle('deps:prepare', (_event, force) => prepareDependencies(Boolean(force)));
   safeHandle('download:start', startDownload);
   safeHandle('download:cancel', cancelDownload);
+  safeHandle('update:check', checkForUpdates);
+  safeHandle('update:download', downloadUpdate);
+  safeHandle('update:open', async (_event, filePath) => {
+    const dirs = getDownloadDirs();
+    const resolved = path.resolve(String(filePath || ''));
+    if (path.dirname(resolved) !== path.resolve(dirs.updates) || path.extname(resolved).toLowerCase() !== '.exe') {
+      throw new Error('Arquivo de atualização inválido.');
+    }
+    const result = await shell.openPath(resolved);
+    return result || null;
+  });
   safeHandle('folder:open', async (_event, kind) => {
     const dirs = await ensureDownloadDirs();
     const target = kind === 'video' ? dirs.video : kind === 'audio' ? dirs.audio : dirs.base;
