@@ -7,6 +7,9 @@ const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const readline = require('node:readline');
 const crypto = require('node:crypto');
+const os = require('node:os');
+const { dialog } = require('electron');
+const { buildVideoSelector, qualityProfiles, overallProgress } = require('./core');
 
 const APP_NAME = 'DLPocket';
 const PROJECT_FOLDER = 'DLPocket';
@@ -46,6 +49,40 @@ async function writeJsonState(filename, value) {
   return value;
 }
 
+async function appendLog(level, message) {
+  try {
+    const logPath = getStatePath('dlpocket.log');
+    const stat = await fsp.stat(logPath).catch(() => null);
+    if (stat?.size > 1_000_000) {
+      await fsp.rm(getStatePath('dlpocket.previous.log'), { force: true });
+      await fsp.rename(logPath, getStatePath('dlpocket.previous.log'));
+    }
+    await fsp.appendFile(logPath, `${new Date().toISOString()} [${level}] ${String(message).replace(/[\r\n]+/g, ' ').slice(0, 1000)}\n`, 'utf8');
+  } catch { /* diagnóstico não pode interromper o aplicativo */ }
+}
+
+function isPathInsideDownloads(filePath) {
+  const base = path.resolve(getDownloadDirs().base) + path.sep;
+  return path.resolve(String(filePath || '')).startsWith(base);
+}
+
+async function diagnostics() {
+  const deps = getDependencyPaths();
+  const versions = await getComponentVersions();
+  let ffmpegVersion = null;
+  try { ffmpegVersion = (await spawnAndCapture(deps.ffmpeg, ['-version'])).split(/\r?\n/)[0]; } catch {}
+  const disk = await fsp.statfs(getDownloadDirs().base).catch(() => null);
+  let github = false;
+  try { github = (await net.fetch('https://api.github.com/rate_limit', { headers: { 'User-Agent': `${APP_NAME}/${app.getVersion()}` } })).ok; } catch {}
+  return {
+    generatedAt: new Date().toISOString(), appVersion: app.getVersion(), electron: process.versions.electron,
+    node: process.versions.node, platform: `${process.platform} ${process.arch}`, ytDlp: versions.ytDlpVersion,
+    ffmpeg: ffmpegVersion, componentsDirectory: deps.binDir, downloadsDirectory: getDownloadDirs().base,
+    freeDiskBytes: disk ? Number(disk.bavail) * Number(disk.bsize) : null, githubConnection: github,
+    logs: getStatePath('dlpocket.log')
+  };
+}
+
 function getDependencyPaths() {
   const binDir = getBinDir();
   return {
@@ -76,12 +113,14 @@ function compareVersions(left, right) {
   return 0;
 }
 
-async function checkForUpdates() {
-  const response = await net.fetch(RELEASES_API, {
+async function checkForUpdates(_event, options = {}) {
+  const endpoint = options.channel === 'beta' ? 'https://api.github.com/repos/RaphaelTW/DLPocket/releases?per_page=20' : RELEASES_API;
+  const response = await net.fetch(endpoint, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': `${APP_NAME}/${app.getVersion()}` }
   });
   if (!response.ok) throw new Error(`Não foi possível verificar atualizações (HTTP ${response.status}).`);
-  const release = await response.json();
+  const payload = await response.json();
+  const release = Array.isArray(payload) ? payload.find((item) => !item.draft) : payload;
   const version = String(release.tag_name || '').replace(/^v/i, '');
   const installer = release.assets?.find((asset) => /^DLPocket-Setup-.*\.exe$/i.test(asset.name));
   const checksums = release.assets?.find((asset) => asset.name === 'SHA256SUMS.txt');
@@ -438,10 +477,11 @@ async function inspectMedia(_event, rawUrl) {
   const url = validateUrl(rawUrl);
   await prepareDependencies(false);
   const deps = getDependencyPaths();
-  const output = await spawnAndCapture(deps.ytDlp, [
-    '--dump-single-json', '--skip-download', '--no-playlist', '--no-warnings',
-    '--ffmpeg-location', deps.binDir, '--js-runtimes', `node:${process.execPath}`, url
-  ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+  const settings = await readJsonState('settings.json', {});
+  const inspectArgs = ['--dump-single-json', '--skip-download', '--flat-playlist', '--no-warnings', '--ffmpeg-location', deps.binDir, '--js-runtimes', `node:${process.execPath}`];
+  if (['chrome', 'edge', 'firefox'].includes(settings.cookieBrowser)) inspectArgs.push('--cookies-from-browser', settings.cookieBrowser);
+  inspectArgs.push(url);
+  const output = await spawnAndCapture(deps.ytDlp, inspectArgs, { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
   const info = JSON.parse(output);
   let thumbnail = null;
   if (typeof info.thumbnail === 'string' && /^https?:\/\//.test(info.thumbnail)) {
@@ -466,7 +506,14 @@ async function inspectMedia(_event, rawUrl) {
     thumbnail,
     duration: Number(info.duration) || null,
     uploader: String(info.uploader || info.channel || '').slice(0, 160),
-    formats
+    formats,
+    qualityProfiles: qualityProfiles(formats),
+    isPlaylist: Boolean(info._type === 'playlist' || Array.isArray(info.entries)),
+    entries: Array.isArray(info.entries) ? info.entries.slice(0, 500).map((entry) => ({
+      id: String(entry.id || ''), title: String(entry.title || 'Item sem título').slice(0, 240),
+      url: entry.webpage_url || entry.url || null, duration: Number(entry.duration) || null,
+      thumbnail: entry.thumbnail || null
+    })).filter((entry) => /^https?:\/\//.test(entry.url || '')) : []
   };
 }
 
@@ -490,11 +537,10 @@ const FORMAT_ALLOWLIST = {
   video: new Set(['mp4', 'mkv', 'webm', 'mov', 'avi', 'flv']),
   audio: new Set(['mp3', 'm4a', 'wav', 'flac', 'opus', 'aac', 'alac', 'vorbis'])
 };
-const QUALITY_ALLOWLIST = new Set(['auto', '720', '1080', '1440', '2160']);
 const FPS_ALLOWLIST = new Set(['auto', '30', '60']);
 const CODEC_ALLOWLIST = new Set(['auto', 'h264', 'h265', 'vp9', 'av1']);
 
-function buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, deps }) {
+function buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, deps, options = {} }) {
   const args = [
     '--no-colors',
     '--newline',
@@ -511,18 +557,23 @@ function buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, dep
     '-o', '%(title).180B [%(id)s].%(ext)s'
   ];
 
+  if (['chrome', 'edge', 'firefox'].includes(options.cookieBrowser)) args.push('--cookies-from-browser', options.cookieBrowser);
+  if (options.embedMetadata) args.push('--embed-metadata');
+  if (options.embedThumbnail) args.push('--embed-thumbnail');
+  if (options.preserveChapters) args.push('--embed-chapters');
+  if (options.subtitleMode && options.subtitleMode !== 'none') {
+    args.push('--write-subs', '--write-auto-subs', '--sub-langs', String(options.subtitleLanguage || 'pt.*,en.*').slice(0, 80), '--sub-format', options.subtitleFormat === 'vtt' ? 'vtt/best' : 'srt/best');
+    if (options.subtitleMode === 'embed' && ['mp4', 'mkv', 'webm'].includes(format)) args.push('--embed-subs');
+  }
+
   if (kind === 'audio') {
-    args.push('-x', '--audio-format', format, '--audio-quality', '0');
+    const bitrate = ['128', '192', '256', '320'].includes(String(options.audioBitrate)) ? String(options.audioBitrate) : '192';
+    const rate = options.audioSampleRate === '44100' ? '44100' : '48000';
+    const channels = options.audioChannels === 'mono' ? '1' : '2';
+    const filters = options.normalizeAudio ? ['-af', 'loudnorm=I=-16:LRA=11:TP=-1.5'] : [];
+    args.push('-x', '--audio-format', format, '--audio-quality', `${bitrate}K`, '--postprocessor-args', `ExtractAudio+ffmpeg_o:-b:a ${bitrate}k -ar ${rate} -ac ${channels}${filters.length ? ` ${filters.join(' ')}` : ''}`);
   } else {
-    const heightFilter = quality === 'auto' ? '' : `[height<=${quality}]`;
-    const fpsFilter = fps === 'auto' ? '' : `[fps<=${fps}]`;
-    const codecFilters = {
-      auto: '', h264: '[vcodec^=avc]', h265: '[vcodec~=(?i)^(hevc|hvc1|hev1)]',
-      vp9: '[vcodec^=vp9]', av1: '[vcodec^=av01]'
-    };
-    const preferred = `bv*${heightFilter}${fpsFilter}${codecFilters[codec]}+ba`;
-    const fallback = `bv*${heightFilter}${fpsFilter}+ba/b${heightFilter}${fpsFilter}`;
-    args.push('-f', `${preferred}/${fallback}`);
+    args.push('-f', buildVideoSelector(quality, fps, codec));
   }
 
   if (kind === 'video' && format === 'mp4') {
@@ -553,7 +604,9 @@ async function startDownload(event, payload) {
   if (!payload || typeof payload !== 'object') throw new Error('Dados de download inválidos.');
   const kind = payload.kind === 'audio' ? 'audio' : payload.kind === 'video' ? 'video' : null;
   const format = typeof payload.format === 'string' ? payload.format.toLowerCase() : '';
-  const quality = QUALITY_ALLOWLIST.has(String(payload.quality)) ? String(payload.quality) : 'auto';
+  const requestedQuality = String(payload.quality);
+  const qualityNumber = Number(requestedQuality);
+  const quality = requestedQuality === 'auto' || (Number.isInteger(qualityNumber) && qualityNumber >= 100 && qualityNumber <= 4320) ? requestedQuality : 'auto';
   const fps = FPS_ALLOWLIST.has(String(payload.fps)) ? String(payload.fps) : 'auto';
   const codec = CODEC_ALLOWLIST.has(String(payload.codec)) ? String(payload.codec) : 'auto';
   if (!kind || !FORMAT_ALLOWLIST[kind].has(format)) throw new Error('Formato não permitido.');
@@ -565,7 +618,7 @@ async function startDownload(event, payload) {
   const dirs = await ensureDownloadDirs();
   const targetDir = kind === 'video' ? dirs.video : dirs.audio;
   const id = crypto.randomUUID();
-  const args = buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, deps });
+  const args = buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, deps, options: payload.options || {} });
 
   const child = spawn(deps.ytDlp, args, {
     windowsHide: true,
@@ -576,13 +629,14 @@ async function startDownload(event, payload) {
     }
   });
 
-  activeDownloads.set(id, { child, startedAt: Date.now(), targetDir });
+  activeDownloads.set(id, { child, startedAt: Date.now(), targetDir, action: null });
   const sender = event.sender;
   const emit = (payloadEvent) => {
     if (!sender.isDestroyed()) sender.send('download:event', { id, ...payloadEvent });
   };
 
   emit({ type: 'started', kind, format, targetDir });
+  appendLog('INFO', `Download iniciado: ${kind}/${format}`);
 
   let stderrTail = '';
   let outputFile = null;
@@ -600,9 +654,7 @@ async function startDownload(event, payload) {
         if (kind === 'video' && Number.isFinite(percent) && previousRawPercent > 80 && percent < 25) transferPass = 1;
         if (Number.isFinite(percent)) previousRawPercent = percent;
         const stage = kind === 'audio' ? 'audio' : transferPass === 0 ? 'video' : 'audio';
-        const overallPercent = Number.isFinite(percent)
-          ? (kind === 'audio' ? percent * 0.9 : transferPass === 0 ? percent * 0.75 : 75 + percent * 0.15)
-          : null;
+        const overallPercent = Number.isFinite(percent) ? overallProgress(kind, transferPass, percent) : null;
         emit({
           type: 'progress',
           percent: overallPercent,
@@ -632,12 +684,16 @@ async function startDownload(event, payload) {
     emit({ type: 'error', message: friendlyDownloadError(error.message) });
   });
   child.on('close', (code, signal) => {
+    const action = activeDownloads.get(id)?.action;
     activeDownloads.delete(id);
+    if (action === 'paused') { emit({ type: 'paused' }); return; }
+    if (action === 'cancelled') { emit({ type: 'cancelled' }); return; }
     if (signal || code === null) {
       emit({ type: 'cancelled' });
       return;
     }
     if (code === 0) {
+      appendLog('INFO', `Download concluído: ${path.basename(outputFile || 'arquivo')}`);
       emit({ type: 'complete', file: outputFile, targetDir });
     } else {
       const usefulError = stderrTail
@@ -646,7 +702,9 @@ async function startDownload(event, payload) {
         .filter(Boolean)
         .slice(-5)
         .join('\n');
-      emit({ type: 'error', message: friendlyDownloadError(usefulError || `yt-dlp encerrou com código ${code}.`) });
+      const friendly = friendlyDownloadError(usefulError || `yt-dlp encerrou com código ${code}.`);
+      appendLog('ERROR', friendly);
+      emit({ type: 'error', message: friendly });
     }
   });
 
@@ -657,6 +715,7 @@ async function cancelDownload(_event, id) {
   if (typeof id !== 'string') return false;
   const active = activeDownloads.get(id);
   if (!active) return false;
+  active.action = 'cancelled';
 
   const pid = active.child.pid;
   if (process.platform === 'win32' && pid) {
@@ -664,6 +723,16 @@ async function cancelDownload(_event, id) {
   } else {
     active.child.kill('SIGTERM');
   }
+  return true;
+}
+
+async function pauseDownload(_event, id) {
+  if (typeof id !== 'string') return false;
+  const active = activeDownloads.get(id);
+  if (!active) return false;
+  active.action = 'paused';
+  if (process.platform === 'win32' && active.child.pid) spawn('taskkill.exe', ['/PID', String(active.child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  else active.child.kill('SIGTERM');
   return true;
 }
 
@@ -709,6 +778,7 @@ app.whenReady().then(() => {
     };
   });
   safeHandle('clipboard:read', () => clipboard.readText());
+  safeHandle('clipboard:write', (_event, text) => { clipboard.writeText(String(text || '').slice(0, 4096)); return true; });
   safeHandle('deps:status', () => dependencyStatus());
   safeHandle('deps:prepare', (_event, force) => prepareDependencies(Boolean(force)));
   safeHandle('deps:versions', getComponentVersions);
@@ -718,8 +788,36 @@ app.whenReady().then(() => {
   safeHandle('settings:set', (_event, settings) => writeJsonState('settings.json', settings && typeof settings === 'object' ? settings : {}));
   safeHandle('history:get', () => readJsonState('history.json', []));
   safeHandle('history:set', (_event, history) => writeJsonState('history.json', Array.isArray(history) ? history.slice(0, 200) : []));
+  safeHandle('history:stats', async () => {
+    const history = await readJsonState('history.json', []);
+    let bytes = 0;
+    for (const item of history) {
+      if (!isPathInsideDownloads(item.file)) continue;
+      bytes += (await fsp.stat(item.file).catch(() => null))?.size || 0;
+    }
+    return { count: history.length, bytes };
+  });
+  safeHandle('history:open-file', async (_event, filePath) => {
+    if (!isPathInsideDownloads(filePath)) throw new Error('Arquivo fora da pasta de downloads.');
+    return (await shell.openPath(path.resolve(filePath))) || null;
+  });
+  safeHandle('history:delete-file', async (_event, filePath) => {
+    if (!isPathInsideDownloads(filePath)) throw new Error('Arquivo fora da pasta de downloads.');
+    await fsp.rm(path.resolve(filePath), { force: true });
+    return true;
+  });
+  safeHandle('diagnostics:get', diagnostics);
+  safeHandle('diagnostics:export', async () => {
+    const report = await diagnostics();
+    const result = await dialog.showSaveDialog(mainWindow, { title: 'Exportar diagnóstico', defaultPath: `DLPocket-diagnostico-${Date.now()}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (result.canceled || !result.filePath) return null;
+    await fsp.writeFile(result.filePath, JSON.stringify(report, null, 2), 'utf8');
+    return result.filePath;
+  });
+  safeHandle('diagnostics:repair', async () => { await appendLog('INFO', 'Reparo de componentes solicitado'); return prepareDependencies(true); });
   safeHandle('download:start', startDownload);
   safeHandle('download:cancel', cancelDownload);
+  safeHandle('download:pause', pauseDownload);
   safeHandle('update:check', checkForUpdates);
   safeHandle('update:download', downloadUpdate);
   safeHandle('update:open', async (_event, filePath) => {
@@ -737,6 +835,15 @@ app.whenReady().then(() => {
     if (path.dirname(resolved) !== path.resolve(dirs.updates) || path.extname(resolved).toLowerCase() !== '.exe') throw new Error('Arquivo de atualização inválido.');
     await fsp.access(resolved);
     pendingUpdateInstaller = resolved;
+    return true;
+  });
+  safeHandle('update:restart', async (_event, filePath) => {
+    const dirs = getDownloadDirs();
+    const resolved = path.resolve(String(filePath || ''));
+    if (path.dirname(resolved) !== path.resolve(dirs.updates) || path.extname(resolved).toLowerCase() !== '.exe') throw new Error('Arquivo de atualização inválido.');
+    await fsp.access(resolved);
+    pendingUpdateInstaller = resolved;
+    setImmediate(() => app.quit());
     return true;
   });
   safeHandle('folder:open', async (_event, kind) => {
@@ -769,3 +876,4 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+  active.action = 'cancelled';

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-windows:
@@ -14,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -36,11 +38,22 @@ jobs:
 
       - name: Validate JavaScript
         shell: pwsh
-        run: npm run check
+        run: npm run check && npm test
+
+      - name: Audit production dependencies
+        shell: pwsh
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Build NSIS installer
         shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: npm run dist:win
+
+      - name: Generate CycloneDX SBOM
+        shell: pwsh
+        run: npm run sbom
 
       - name: Generate SHA-256 checksum
         shell: pwsh
@@ -48,6 +61,14 @@ jobs:
           $installer = Get-ChildItem "dist/DLPocket-Setup-*.exe" | Select-Object -First 1
           $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($installer.Name)" | Set-Content "dist/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/DLPocket-Setup-*.exe
+            dist/SHA256SUMS.txt
+            dist/DLPocket-SBOM.cdx.json
 
       - name: Create or update GitHub Release
         shell: pwsh
@@ -59,4 +80,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --title "DLPocket $tag" --notes-file "RELEASE-$tag.md"
           }
-          gh release upload $tag "dist/DLPocket-Setup-*.exe" "dist/SHA256SUMS.txt" --clobber
+          gh release upload $tag "dist/DLPocket-Setup-*.exe" "dist/SHA256SUMS.txt" "dist/DLPocket-SBOM.cdx.json" --clobber

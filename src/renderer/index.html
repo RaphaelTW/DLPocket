@@ -71,6 +71,7 @@
         <div><strong id="preview-title"></strong><span id="preview-details"></span></div>
         <span id="preview-size" class="preview-size"></span>
       </div>
+      <div id="playlist-panel" class="playlist-panel" hidden><div class="playlist-header"><strong>Playlist detectada</strong><span id="playlist-count"></span><button id="playlist-toggle-all" class="text-button" type="button">Selecionar todos</button></div><div id="playlist-items" class="playlist-items"></div></div>
 
       <div class="choice-grid">
         <fieldset class="choice-group">
@@ -108,6 +109,23 @@
         <label><span>Codec</span><select id="codec-select"><option value="auto">Automático</option><option value="h264">H.264</option><option value="h265">H.265</option><option value="vp9">VP9</option><option value="av1">AV1</option></select></label>
       </div>
 
+      <details class="advanced-options">
+        <summary>Mais opções</summary>
+        <div class="advanced-grid">
+          <label class="audio-option"><span>Bitrate</span><select id="audio-bitrate"><option value="128">128 kbps</option><option value="192" selected>192 kbps</option><option value="256">256 kbps</option><option value="320">320 kbps</option></select></label>
+          <label class="audio-option"><span>Frequência</span><select id="audio-rate"><option value="44100">44,1 kHz</option><option value="48000" selected>48 kHz</option></select></label>
+          <label class="audio-option"><span>Canais</span><select id="audio-channels"><option value="stereo">Estéreo</option><option value="mono">Mono</option></select></label>
+          <label><span>Legendas</span><select id="subtitle-mode"><option value="none">Não baixar</option><option value="embed">Incorporar</option><option value="separate">Arquivo separado</option></select></label>
+          <label><span>Idioma da legenda</span><input id="subtitle-language" value="pt.*,en.*" maxlength="80" /></label>
+          <label><span>Formato da legenda</span><select id="subtitle-format"><option value="srt">SRT</option><option value="vtt">VTT</option></select></label>
+          <label class="check-setting audio-option"><input id="audio-normalize" type="checkbox" /><span>Normalizar áudio</span></label>
+          <label class="check-setting"><input id="embed-thumbnail" type="checkbox" checked /><span>Incorporar capa</span></label>
+          <label class="check-setting"><input id="embed-metadata" type="checkbox" checked /><span>Incorporar metadados</span></label>
+          <label class="check-setting"><input id="preserve-chapters" type="checkbox" checked /><span>Preservar capítulos</span></label>
+        </div>
+        <p id="conversion-warning" class="conversion-warning" hidden></p>
+      </details>
+
       <div class="destination-row">
         <div>
           <span class="destination-label">Destino</span>
@@ -138,6 +156,7 @@
         </div>
         <div class="queue-actions"><button id="clear-completed" class="text-button" type="button">Limpar concluídos</button><span id="queue-count" class="muted-pill">0 itens</span></div>
       </div>
+      <div class="history-toolbar"><input id="history-search" type="search" placeholder="Buscar no histórico" /><select id="history-filter"><option value="all">Todos</option><option value="video">Vídeo</option><option value="audio">Áudio</option><option value="complete">Concluídos</option><option value="error">Erros</option></select><button id="cancel-all" class="text-button" type="button">Cancelar todos</button><span id="history-stats"></span></div>
 
       <div id="empty-state" class="empty-state">
         <div class="empty-icon" aria-hidden="true">
@@ -165,10 +184,15 @@
         <label><span>Qualidade padrão</span><select id="setting-quality"><option value="auto">Automática</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p</option><option value="2160">4K</option></select></label>
         <label><span>Formato padrão</span><select id="setting-format"><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option></select></label>
         <label><span>Após concluir</span><select id="setting-completion"><option value="nothing">Não fazer nada</option><option value="folder">Abrir pasta</option></select></label>
+        <label><span>Cookies do navegador</span><select id="setting-cookies"><option value="none">Não usar</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="firefox">Firefox</option></select></label>
+        <label><span>Downloads simultâneos</span><select id="setting-concurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+        <label><span>Canal de atualização</span><select id="setting-update-channel"><option value="stable">Estável</option><option value="beta">Beta</option></select></label>
         <label class="check-setting"><input id="setting-auto-updates" type="checkbox" checked /><span>Atualizações automáticas</span></label>
+        <label class="check-setting"><input id="setting-silent-update" type="checkbox" /><span>Baixar atualizações em segundo plano</span></label>
       </div>
+      <p class="cookies-help">O yt-dlp lê somente cookies de sessão do navegador selecionado. Senhas nunca são copiadas. Escolha “Não usar” para remover a autorização.</p>
       <div class="component-row"><div><strong>yt-dlp</strong><span id="yt-dlp-version">Verificando…</span></div><button id="update-components" class="update-secondary" type="button">Atualizar componentes</button></div>
-      <div class="settings-footer"><button id="save-settings" class="update-primary" value="default">Salvar</button></div>
+      <div class="settings-footer"><button id="diagnostics-button" class="update-secondary" type="button">Diagnóstico</button><button id="save-settings" class="update-primary" value="default">Salvar</button></div>
     </form>
   </dialog>
 

@@ -842,3 +842,33 @@ button:active:not(:disabled), .segment:active { transform: scale(.975); }
   :root:not([data-theme]) .update-primary { background: linear-gradient(180deg, #4a91e8, #3584e4); border: 1px solid #1c71d8; color: #fff; }
   :root:not([data-theme]) .brand-mark svg rect { fill: #3584e4; stroke: #3584e4; }
 }
+
+.playlist-panel { margin: 5px 0 7px; padding: 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.playlist-panel[hidden] { display: none; }
+.playlist-header { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+.playlist-header span { color: var(--muted); }
+.playlist-header button { margin-left: auto; }
+.playlist-items { max-height: 92px; margin-top: 5px; overflow-y: auto; display: grid; gap: 3px; }
+.playlist-items label { display: flex; gap: 6px; align-items: center; min-width: 0; padding: 3px 5px; border-radius: 6px; font-size: 9px; }
+.playlist-items label:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.playlist-items span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.advanced-options { margin-top: 5px; }
+.advanced-options summary { width: max-content; color: var(--muted); font-size: 9px; font-weight: 700; cursor: pointer; }
+.advanced-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+.advanced-grid label > span { display: block; margin-bottom: 2px; color: var(--muted); font-size: 8px; font-weight: 650; }
+.advanced-grid input:not([type="checkbox"]), .advanced-grid select { width: 100%; height: 29px; font-size: 10px; }
+.advanced-grid .check-setting { min-height: 29px; padding-top: 8px; }
+.conversion-warning, .cookies-help { margin: 6px 0 0; color: var(--warning); font-size: 9px; line-height: 1.35; }
+.cookies-help { color: var(--muted); }
+.history-toolbar { display: grid; grid-template-columns: minmax(120px,1fr) 100px auto auto; gap: 6px; align-items: center; margin-bottom: 6px; }
+.history-toolbar input, .history-toolbar select { height: 28px; font-size: 9px; }
+.history-toolbar span { color: var(--muted); font-size: 8px; white-space: nowrap; }
+.settings-footer { gap: 8px; }
+.download-status-row { flex-wrap: wrap; }
+.is-paused .progress-bar { animation-play-state: paused; filter: grayscale(.7); }
+
+@media (max-width: 700px) {
+  .advanced-grid { grid-template-columns: 1fr 1fr; }
+  .history-toolbar { grid-template-columns: 1fr 90px; }
+  .history-toolbar span { display: none; }
+}

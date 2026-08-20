@@ -9,7 +9,10 @@ const state = {
   updateFile: null,
   media: null,
   history: [],
-  settings: { theme: 'system', language: 'system', quality: 'auto', format: 'mp4', autoUpdates: true, completion: 'nothing' }
+  settings: { theme: 'system', language: 'system', quality: 'auto', format: 'mp4', autoUpdates: true, completion: 'nothing', cookieBrowser: 'none', concurrency: 2, updateChannel: 'stable', silentUpdate: false },
+  pendingQueue: [],
+  activeCount: 0,
+  completionResolvers: new Map()
 };
 
 const formats = {
@@ -102,6 +105,7 @@ function renderFormats() {
 function updateComposerCopy() {
   state.format = formatSelect.value;
   $('#video-options').hidden = state.kind === 'audio';
+  document.querySelectorAll('.audio-option').forEach((element) => { element.hidden = state.kind !== 'audio'; });
   const copy = translations?.[resolvedLanguage?.(state.settings.language)] || translations?.['pt-BR'];
   downloadButtonText.textContent = copy ? `${copy.download} ${state.kind === 'audio' ? copy.audio.toLowerCase() : copy.video.toLowerCase()}` : `Baixar ${state.kind === 'audio' ? 'áudio' : 'vídeo'}`;
   if (state.appInfo?.downloads) {
@@ -171,6 +175,10 @@ function updateEstimate() {
   const audioSize = Math.max(0, ...audios.map((item) => Number(item.filesize) || 0));
   const bytes = state.kind === 'audio' ? audioSize : videoSize + audioSize;
   $('#preview-size').textContent = bytes ? `~ ${(bytes / 1048576).toFixed(bytes > 104857600 ? 0 : 1)} MB` : 'Tamanho indisponível';
+  const conversion = ['mov', 'avi', 'flv'].includes(formatSelect.value);
+  const warning = $('#conversion-warning');
+  warning.hidden = !conversion;
+  warning.textContent = conversion ? `${formatSelect.value.toUpperCase()} exige conversão pelo FFmpeg e pode usar bastante CPU e levar mais tempo.` : '';
 }
 
 async function inspectCurrentUrl() {
@@ -188,12 +196,45 @@ async function inspectCurrentUrl() {
     thumbnail.hidden = !media.thumbnail;
     if (media.thumbnail) thumbnail.src = media.thumbnail;
     updateEstimate();
+    renderRealQualities(media.qualityProfiles || []);
+    renderPlaylist(media);
   } catch (error) {
     state.media = null;
     $('#preview-title').textContent = error?.message || 'Não foi possível carregar as informações.';
     $('#preview-details').textContent = '';
     $('#preview-size').textContent = '';
   }
+}
+
+function renderRealQualities(profiles) {
+  const previous = qualitySelect.value;
+  qualitySelect.replaceChildren(new Option('Automática (melhor disponível)', 'auto'));
+  for (const profile of profiles) {
+    const size = profile.filesize ? ` • ~${(profile.filesize / 1048576).toFixed(0)} MB` : '';
+    qualitySelect.appendChild(new Option(`${profile.height}p • ${profile.fps || '?'} FPS • ${profile.codec}${size}`, profile.value));
+  }
+  qualitySelect.value = [...qualitySelect.options].some((option) => option.value === previous) ? previous : 'auto';
+}
+
+function renderPlaylist(media) {
+  const panel = $('#playlist-panel');
+  const container = $('#playlist-items');
+  container.replaceChildren();
+  panel.hidden = !media.isPlaylist || !media.entries.length;
+  if (panel.hidden) return;
+  $('#playlist-count').textContent = `${media.entries.length} itens`;
+  media.entries.forEach((entry, index) => {
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" checked data-index="${index}"><span></span>`;
+    label.querySelector('span').textContent = `${index + 1}. ${entry.title}`;
+    for (const [symbol, offset] of [['↑', -1], ['↓', 1]]) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'queue-move'; button.textContent = symbol;
+      button.disabled = index + offset < 0 || index + offset >= media.entries.length;
+      button.addEventListener('click', () => { const target = index + offset; [media.entries[index], media.entries[target]] = [media.entries[target], media.entries[index]]; renderPlaylist(media); });
+      label.appendChild(button);
+    }
+    container.appendChild(label);
+  });
 }
 
 function updateQueueCount() {
@@ -254,14 +295,42 @@ async function ensureDependencies() {
 
 async function beginDownload() {
   if (!validateUrl()) return;
+  const selected = state.media?.isPlaylist
+    ? state.media.entries.filter((_, index) => $(`#playlist-items input[data-index="${index}"]`)?.checked)
+    : [];
+  if (selected.length) {
+    const limit = Math.max(1, Math.min(4, Number(state.settings.concurrency) || 1));
+    for (let index = 0; index < selected.length; index += limit) {
+      await Promise.all(selected.slice(index, index + limit).map((entry) => startSingleDownload({ url: entry.url, title: entry.title })));
+    }
+    $('#playlist-panel').hidden = true;
+    return;
+  }
+  await startSingleDownload();
+}
+
+async function startSingleDownload(source = null) {
   const payload = {
-    url: urlInput.value.trim(),
+    url: source?.url || urlInput.value.trim(),
     kind: state.kind,
     format: formatSelect.value,
     quality: qualitySelect.value,
     fps: fpsSelect.value,
     codec: codecSelect.value,
-    title: state.media?.title || null
+    title: source?.title || state.media?.title || null,
+    options: {
+      cookieBrowser: state.settings.cookieBrowser,
+      audioBitrate: $('#audio-bitrate').value,
+      audioSampleRate: $('#audio-rate').value,
+      audioChannels: $('#audio-channels').value,
+      normalizeAudio: $('#audio-normalize').checked,
+      subtitleMode: $('#subtitle-mode').value,
+      subtitleLanguage: $('#subtitle-language').value,
+      subtitleFormat: $('#subtitle-format').value,
+      embedThumbnail: $('#embed-thumbnail').checked,
+      embedMetadata: $('#embed-metadata').checked,
+      preserveChapters: $('#preserve-chapters').checked
+    }
   };
 
   const tempId = `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -279,10 +348,16 @@ async function beginDownload() {
     state.downloads.delete(tempId);
     state.downloads.set(result.id, { payload, ui });
     ui.cancel.dataset.downloadId = result.id;
+    const pause = document.createElement('button');
+    pause.className = 'cancel-button pause-button';
+    pause.type = 'button'; pause.textContent = 'Pausar';
+    pause.addEventListener('click', async () => { pause.disabled = true; ui.status.textContent = 'Pausando…'; await window.dlpocket.pauseDownload(result.id); });
+    ui.cancel.parentElement.insertBefore(pause, ui.cancel);
     urlInput.value = '';
     state.media = null;
     mediaPreview.hidden = true;
     showUrlError('');
+    return new Promise((resolve) => state.completionResolvers.set(result.id, resolve));
   } catch (error) {
     ui.root.classList.add('is-error');
     ui.icon.textContent = '!';
@@ -328,6 +403,7 @@ function handleDownloadEvent(event) {
   } else if (event.type === 'status') {
     ui.status.textContent = event.message.replace(/^\[[^\]]+\]\s*/, '').slice(0, 120);
   } else if (event.type === 'complete') {
+    ui.root.querySelector('.pause-button')?.remove();
     ui.root.classList.add('is-complete');
     ui.icon.textContent = '✓';
     ui.percent.textContent = '100%';
@@ -339,8 +415,10 @@ function handleDownloadEvent(event) {
     ui.cancel.dataset.downloadId = '';
     ui.cancel.onclick = () => window.dlpocket.openDownloadsFolder(item.payload.kind);
     saveHistory({ id: event.id, ...item.payload, file: event.file || null, completedAt: new Date().toISOString(), status: 'complete' });
+    updateHistoryStats();
     if (state.settings.completion === 'folder') window.dlpocket.openDownloadsFolder(item.payload.kind);
   } else if (event.type === 'error') {
+    ui.root.querySelector('.pause-button')?.remove();
     ui.root.classList.add('is-error');
     ui.icon.textContent = '!';
     ui.percent.textContent = 'Erro';
@@ -349,12 +427,25 @@ function handleDownloadEvent(event) {
     ui.cancel.disabled = false;
     ui.cancel.dataset.downloadId = '';
     ui.cancel.onclick = () => window.dlpocket.openDownloadsFolder(item.payload.kind);
+    saveHistory({ id: event.id, ...item.payload, file: null, completedAt: new Date().toISOString(), status: 'error', error: event.message || null });
   } else if (event.type === 'cancelled') {
     ui.root.classList.add('is-cancelled');
     ui.icon.textContent = '×';
     ui.percent.textContent = '—';
     ui.status.textContent = 'Download cancelado';
     ui.cancel.hidden = true;
+  } else if (event.type === 'paused') {
+    ui.root.classList.add('is-paused');
+    ui.status.textContent = 'Pausado — o arquivo parcial será reutilizado';
+    ui.root.querySelector('.pause-button')?.remove();
+    ui.cancel.textContent = 'Continuar';
+    ui.cancel.disabled = false;
+    ui.cancel.dataset.downloadId = '';
+    ui.cancel.onclick = () => { ui.root.remove(); state.downloads.delete(event.id); startSingleDownload({ url: item.payload.url, title: item.payload.title }); };
+  }
+  if (['complete', 'error', 'cancelled', 'paused'].includes(event.type)) {
+    state.completionResolvers.get(event.id)?.();
+    state.completionResolvers.delete(event.id);
   }
 }
 
@@ -448,17 +539,32 @@ async function loadPreferences() {
 function restoreHistory() {
   for (const entry of state.history.slice().reverse()) {
     const ui = createDownloadItem(entry.id, entry);
-    ui.root.classList.add('is-complete', 'is-history');
-    ui.icon.textContent = '✓';
-    ui.percent.textContent = '100%';
-    ui.bar.style.width = '100%';
-    ui.status.textContent = new Date(entry.completedAt).toLocaleString();
-    ui.cancel.textContent = 'Abrir pasta';
+    ui.root.classList.add(entry.status === 'error' ? 'is-error' : 'is-complete', 'is-history');
+    ui.icon.textContent = entry.status === 'error' ? '!' : '✓';
+    ui.percent.textContent = entry.status === 'error' ? 'Erro' : '100%';
+    ui.bar.style.width = entry.status === 'error' ? '18%' : '100%';
+    ui.status.textContent = entry.status === 'error' ? (entry.error || 'Falha no download') : new Date(entry.completedAt).toLocaleString();
+    ui.cancel.textContent = entry.file ? 'Abrir arquivo' : 'Abrir pasta';
     ui.cancel.dataset.downloadId = '';
-    ui.cancel.onclick = () => window.dlpocket.openDownloadsFolder(entry.kind);
+    ui.cancel.onclick = () => entry.file ? window.dlpocket.openHistoryFile(entry.file) : window.dlpocket.openDownloadsFolder(entry.kind);
+    const actions = ui.cancel.parentElement;
+    const addAction = (label, handler) => { const button = document.createElement('button'); button.className = 'cancel-button'; button.type = 'button'; button.textContent = label; button.addEventListener('click', handler); actions.appendChild(button); };
+    addAction('Copiar link', () => window.dlpocket.writeClipboard(entry.url));
+    addAction('Baixar novamente', () => startSingleDownload({ url: entry.url, title: entry.title }));
+    addAction('Remover', async () => {
+      if (entry.file && confirm('Deseja apagar também o arquivo baixado?')) await window.dlpocket.deleteHistoryFile(entry.file).catch(() => {});
+      state.history = state.history.filter((item) => item.id !== entry.id);
+      state.downloads.delete(entry.id); ui.root.remove(); await window.dlpocket.setHistory(state.history); updateQueueCount(); updateHistoryStats();
+    });
     state.downloads.set(entry.id, { payload: entry, ui, history: true });
   }
   updateQueueCount();
+  updateHistoryStats();
+}
+
+async function updateHistoryStats() {
+  const stats = await window.dlpocket.getHistoryStats().catch(() => ({ count: 0, bytes: 0 }));
+  $('#history-stats').textContent = `${stats.count} registros • ${(stats.bytes / 1048576).toFixed(stats.bytes > 104857600 ? 0 : 1)} MB`;
 }
 
 async function refreshComponentVersion(auto = false) {
@@ -476,13 +582,16 @@ async function refreshComponentVersion(auto = false) {
 
 async function checkForUpdates() {
   try {
-    const release = await window.dlpocket.checkForUpdates();
+    const release = await window.dlpocket.checkForUpdates({ channel: state.settings.updateChannel });
     if (!release.available) return;
+    if (state.settings.ignoredVersion === release.version) return;
     state.update = release;
     updateTitle.textContent = `DLPocket v${release.version} disponível`;
     const notes = String(release.notes || '').replace(/[#*_`>-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 220);
     updateMessage.textContent = notes || `Você está usando a v${release.currentVersion}. Deseja baixar a nova versão?`;
+    updateDismiss.textContent = `Ignorar v${release.version}`;
     updateCard.hidden = false;
+    if (state.settings.silentUpdate) downloadAvailableUpdate();
   } catch {
     // A verificação é silenciosa para não interromper o uso offline.
   }
@@ -490,7 +599,9 @@ async function checkForUpdates() {
 
 async function downloadAvailableUpdate() {
   if (state.updateFile) {
-    await window.dlpocket.openUpdate(state.updateFile);
+    updateMessage.textContent = 'Preparando instalação…';
+    updateProgressBar.style.width = '100%';
+    await window.dlpocket.restartAndUpdate(state.updateFile);
     return;
   }
   if (!state.update) return;
@@ -504,7 +615,7 @@ async function downloadAvailableUpdate() {
     updateProgressBar.style.width = '100%';
     updateTitle.textContent = 'Atualização pronta';
     updateMessage.textContent = 'Download verificado. Abra o instalador para concluir a atualização.';
-    updateDownload.textContent = 'Abrir instalador';
+    updateDownload.textContent = 'Reiniciar e atualizar';
     updateDownload.disabled = false;
     updateDismiss.hidden = false;
     updateDismiss.textContent = 'Instalar ao fechar';
@@ -580,18 +691,53 @@ updateDismiss.addEventListener('click', async () => {
     await window.dlpocket.installUpdateOnQuit(state.updateFile);
     updateDismiss.textContent = 'Instalação agendada';
     updateDismiss.disabled = true;
-  } else updateCard.hidden = true;
+  } else {
+    if (state.update?.version) {
+      state.settings.ignoredVersion = state.update.version;
+      await window.dlpocket.setSettings(state.settings);
+    }
+    updateCard.hidden = true;
+  }
 });
 qualitySelect.addEventListener('change', updateEstimate);
 fpsSelect.addEventListener('change', updateEstimate);
 codecSelect.addEventListener('change', updateEstimate);
+formatSelect.addEventListener('change', updateEstimate);
+$('#playlist-toggle-all').addEventListener('click', () => {
+  const inputs = [...document.querySelectorAll('#playlist-items input')];
+  const select = inputs.some((input) => !input.checked);
+  inputs.forEach((input) => { input.checked = select; });
+  $('#playlist-toggle-all').textContent = select ? 'Desmarcar todos' : 'Selecionar todos';
+});
+document.querySelectorAll('input[name="kind"]').forEach((input) => input.addEventListener('change', () => {
+  document.querySelectorAll('.audio-option').forEach((element) => { element.hidden = input.value !== 'audio'; });
+}));
+$('#cancel-all').addEventListener('click', () => {
+  for (const [id, item] of state.downloads) if (!item.history && !id.startsWith('pending-')) window.dlpocket.cancelDownload(id);
+});
+function filterHistory() {
+  const query = $('#history-search').value.trim().toLowerCase();
+  const filter = $('#history-filter').value;
+  for (const item of state.downloads.values()) {
+    if (!item.history) continue;
+    const matchesText = !query || `${item.payload.title || ''} ${item.payload.url || ''}`.toLowerCase().includes(query);
+    const matchesFilter = filter === 'all' || item.payload.kind === filter || item.payload.status === filter;
+    item.ui.root.hidden = !(matchesText && matchesFilter);
+  }
+}
+$('#history-search').addEventListener('input', filterHistory);
+$('#history-filter').addEventListener('change', filterHistory);
 $('#settings-button').addEventListener('click', async () => {
   $('#setting-theme').value = state.settings.theme;
   $('#setting-language').value = state.settings.language;
   $('#setting-quality').value = state.settings.quality;
   $('#setting-format').value = state.settings.format;
   $('#setting-completion').value = state.settings.completion;
+  $('#setting-cookies').value = state.settings.cookieBrowser || 'none';
+  $('#setting-concurrency').value = String(state.settings.concurrency || 2);
+  $('#setting-update-channel').value = state.settings.updateChannel || 'stable';
   $('#setting-auto-updates').checked = state.settings.autoUpdates;
+  $('#setting-silent-update').checked = Boolean(state.settings.silentUpdate);
   settingsDialog.showModal();
   refreshComponentVersion(false);
 });
@@ -604,6 +750,10 @@ $('#save-settings').addEventListener('click', async (event) => {
     quality: $('#setting-quality').value,
     format: $('#setting-format').value,
     completion: $('#setting-completion').value,
+    cookieBrowser: $('#setting-cookies').value,
+    concurrency: Number($('#setting-concurrency').value),
+    updateChannel: $('#setting-update-channel').value,
+    silentUpdate: $('#setting-silent-update').checked,
     autoUpdates: $('#setting-auto-updates').checked
   };
   await window.dlpocket.setSettings(state.settings);
@@ -624,6 +774,13 @@ $('#update-components').addEventListener('click', async (event) => {
   await refreshComponentVersion(true);
   button.disabled = false;
   applyLanguage(state.settings.language);
+});
+$('#diagnostics-button').addEventListener('click', async (event) => {
+  event.preventDefault();
+  const info = await window.dlpocket.getDiagnostics();
+  const summary = `DLPocket ${info.appVersion}\nElectron ${info.electron}\nNode ${info.node}\nyt-dlp ${info.ytDlp || 'indisponível'}\n${info.ffmpeg || 'FFmpeg indisponível'}\nEspaço livre: ${info.freeDiskBytes ? (info.freeDiskBytes / 1073741824).toFixed(1) + ' GB' : 'indisponível'}\nGitHub: ${info.githubConnection ? 'conectado' : 'sem conexão'}\n\nExportar relatório sem dados pessoais?`;
+  if (confirm(summary)) await window.dlpocket.exportDiagnostics();
+  if (confirm('Deseja reparar yt-dlp, FFmpeg e FFprobe agora?')) await window.dlpocket.repairComponents();
 });
 $('#clear-completed').addEventListener('click', () => {
   for (const [id, item] of state.downloads) {
