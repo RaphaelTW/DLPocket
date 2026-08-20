@@ -365,8 +365,8 @@ function validateUrl(raw) {
 }
 
 const FORMAT_ALLOWLIST = {
-  video: new Set(['mp4', 'mkv', 'webm']),
-  audio: new Set(['mp3', 'm4a', 'wav', 'flac', 'opus'])
+  video: new Set(['mp4', 'mkv', 'webm', 'mov', 'avi', 'flv']),
+  audio: new Set(['mp3', 'm4a', 'wav', 'flac', 'opus', 'aac', 'alac', 'vorbis'])
 };
 
 function buildYtDlpArgs({ url, kind, format, targetDir, deps }) {
@@ -400,8 +400,10 @@ function buildYtDlpArgs({ url, kind, format, targetDir, deps }) {
       '--merge-output-format', 'webm',
       '--remux-video', 'webm'
     );
-  } else {
+  } else if (format === 'mkv') {
     args.push('-f', 'bv*+ba/b', '--merge-output-format', 'mkv', '--remux-video', 'mkv');
+  } else {
+    args.push('-f', 'bv*+ba/b', '--merge-output-format', 'mkv', '--recode-video', format);
   }
 
   args.push(url);
@@ -573,6 +575,10 @@ app.whenReady().then(() => {
     const target = kind === 'video' ? dirs.video : kind === 'audio' ? dirs.audio : dirs.base;
     const result = await shell.openPath(target);
     return result || null;
+  });
+  safeHandle('external:yt-dlp', async () => {
+    await shell.openExternal('https://github.com/yt-dlp/yt-dlp');
+    return true;
   });
 
   createWindow();

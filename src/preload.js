@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('dlpocket', {
   startDownload: (options) => ipcRenderer.invoke('download:start', options),
   cancelDownload: (id) => ipcRenderer.invoke('download:cancel', id),
   openDownloadsFolder: (kind = 'base') => ipcRenderer.invoke('folder:open', kind),
+  openYtDlpRepository: () => ipcRenderer.invoke('external:yt-dlp'),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (release) => ipcRenderer.invoke('update:download', release),
   openUpdate: (filePath) => ipcRenderer.invoke('update:open', filePath),

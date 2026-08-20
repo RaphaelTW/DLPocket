@@ -7,8 +7,8 @@ DLPocket transforma o fluxo tradicional de comandos do `yt-dlp` em uma interface
 ## ✨ Principais recursos
 
 - Interface limpa, simples e responsiva.
-- Download de vídeo em **MP4**, **MKV** e **WebM**.
-- Extração de áudio em **MP3**, **M4A**, **WAV**, **FLAC** e **Opus**.
+- Download de vídeo em **MP4**, **MKV**, **WebM**, **MOV**, **AVI** e **FLV**.
+- Extração de áudio em **MP3**, **M4A**, **WAV**, **FLAC**, **Opus**, **AAC**, **ALAC** e **Vorbis/OGG**.
 - Preparação automática do **yt-dlp** e **FFmpeg** no primeiro uso.
 - Verificação **SHA-256** dos binários baixados antes da utilização.
 - Não exige que o usuário final rode `winget`, PowerShell ou Prompt de Comando.
@@ -17,6 +17,7 @@ DLPocket transforma o fluxo tradicional de comandos do `yt-dlp` em uma interface
 - Cancelamento de download em andamento.
 - Botão para abrir rapidamente a pasta de destino.
 - Renderer Electron isolado, sem acesso direto ao Node.js.
+- Verificação e download seguro de novas versões com validação SHA-256.
 - Downloads organizados automaticamente em:
 
 ```text
@@ -48,6 +49,8 @@ A arquitetura do projeto permite expansão futura para Linux e macOS, mas a prep
 ## 🧩 Como funciona
 
 O DLPocket não implementa um downloader próprio. Ele fornece uma camada gráfica segura sobre o `yt-dlp`.
+
+Projeto oficial utilizado: [yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 O processo principal do Electron:
 

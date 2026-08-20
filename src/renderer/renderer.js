@@ -13,14 +13,20 @@ const formats = {
   video: [
     ['mp4', 'MP4'],
     ['mkv', 'MKV'],
-    ['webm', 'WebM']
+    ['webm', 'WebM'],
+    ['mov', 'MOV (conversão)'],
+    ['avi', 'AVI (conversão)'],
+    ['flv', 'FLV (conversão)']
   ],
   audio: [
     ['mp3', 'MP3'],
     ['m4a', 'M4A'],
     ['wav', 'WAV'],
     ['flac', 'FLAC'],
-    ['opus', 'Opus']
+    ['opus', 'Opus'],
+    ['aac', 'AAC'],
+    ['alac', 'ALAC'],
+    ['vorbis', 'Vorbis (OGG)']
   ]
 };
 
@@ -369,6 +375,7 @@ $('#paste-button').addEventListener('click', async () => {
 downloadButton.addEventListener('click', beginDownload);
 $('#open-base-folder').addEventListener('click', () => window.dlpocket.openDownloadsFolder('base'));
 $('#open-current-folder').addEventListener('click', () => window.dlpocket.openDownloadsFolder(selectedFolderKind()));
+$('#yt-dlp-link').addEventListener('click', () => window.dlpocket.openYtDlpRepository());
 updateDownload.addEventListener('click', downloadAvailableUpdate);
 updateDismiss.addEventListener('click', () => { updateCard.hidden = true; });
 
