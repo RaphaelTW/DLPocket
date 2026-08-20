@@ -383,7 +383,8 @@ function handleUpdateEvent(event) {
 }
 
 function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme === 'system' ? '' : theme;
+  if (theme === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.dataset.theme = theme;
 }
 
 const translations = {

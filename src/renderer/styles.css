@@ -640,3 +640,205 @@ h2 { font-size: 17px; }
   .tuning-grid { margin-top: 4px; }
   .tuning-grid select { height: 28px; }
 }
+
+/* v1.3.1 — tema claro inspirado no GNOME/Adwaita */
+body, button, input, select { font-family: Cantarell, Inter, "Segoe UI", sans-serif; }
+button, .segment, select, input, .card, .download-item {
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .18s ease, transform .16s ease;
+}
+button:active:not(:disabled), .segment:active { transform: scale(.975); }
+
+:root[data-theme="light"] {
+  color-scheme: light !important;
+  --bg: #f6f5f4;
+  --surface: #ffffff;
+  --surface-2: #f1f0ee;
+  --text: #1e1e1e;
+  --muted: #5e5c64;
+  --border: #d8d6d2;
+  --accent: #3584e4;
+  --accent-contrast: #ffffff;
+  --success: #2ec27e;
+  --danger: #e01b24;
+  --warning: #e5a50a;
+  --shadow: 0 3px 12px rgba(46, 52, 54, .10), 0 18px 42px rgba(46, 52, 54, .05);
+}
+:root[data-theme="light"] html,
+:root[data-theme="light"] body {
+  background: #f6f5f4 !important;
+  color: #1e1e1e !important;
+}
+:root[data-theme="light"] body {
+  background-image: radial-gradient(circle at 8% -8%, rgba(53,132,228,.10), transparent 28%), radial-gradient(circle at 96% 0%, rgba(38,162,105,.07), transparent 24%) !important;
+}
+:root[data-theme="light"] .topbar {
+  padding: 5px 7px;
+  border-radius: 13px;
+  color: #1e1e1e !important;
+}
+:root[data-theme="light"] h1,
+:root[data-theme="light"] h2,
+:root[data-theme="light"] .brand p,
+:root[data-theme="light"] .field-label,
+:root[data-theme="light"] .choice-group legend,
+:root[data-theme="light"] .destination-row strong,
+:root[data-theme="light"] .download-title,
+:root[data-theme="light"] .empty-state strong,
+:root[data-theme="light"] .settings-dialog,
+:root[data-theme="light"] .component-row strong {
+  color: #1e1e1e !important;
+}
+:root[data-theme="light"] .brand p,
+:root[data-theme="light"] .eyebrow,
+:root[data-theme="light"] .destination-label,
+:root[data-theme="light"] .download-meta,
+:root[data-theme="light"] .download-status,
+:root[data-theme="light"] .empty-state p,
+:root[data-theme="light"] .footer,
+:root[data-theme="light"] .component-row span,
+:root[data-theme="light"] .tuning-grid label > span,
+:root[data-theme="light"] .settings-grid label > span {
+  color: #68666d !important;
+}
+:root[data-theme="light"] .brand-mark { filter: drop-shadow(0 2px 4px rgba(53,132,228,.18)); }
+:root[data-theme="light"] .brand-mark svg rect { fill: #3584e4 !important; stroke: #3584e4 !important; }
+:root[data-theme="light"] .brand-mark svg path { stroke: #fff !important; }
+:root[data-theme="light"] .card,
+:root[data-theme="light"] .composer,
+:root[data-theme="light"] .queue-card,
+:root[data-theme="light"] .settings-dialog {
+  background: rgba(255,255,255,.96) !important;
+  border-color: #d8d6d2 !important;
+  color: #1e1e1e !important;
+  box-shadow: var(--shadow) !important;
+}
+:root[data-theme="light"] .composer:hover,
+:root[data-theme="light"] .queue-card:hover { border-color: #c8c5c0 !important; box-shadow: 0 5px 18px rgba(46,52,54,.13), 0 22px 48px rgba(46,52,54,.06) !important; }
+:root[data-theme="light"] .icon-button,
+:root[data-theme="light"] .secondary-button,
+:root[data-theme="light"] .update-secondary,
+:root[data-theme="light"] .dialog-close {
+  background: #ffffff !important;
+  border-color: #d8d6d2 !important;
+  color: #2e3436 !important;
+  box-shadow: 0 1px 2px rgba(46,52,54,.08) !important;
+}
+:root[data-theme="light"] .icon-button:hover,
+:root[data-theme="light"] .secondary-button:hover,
+:root[data-theme="light"] .update-secondary:hover,
+:root[data-theme="light"] .dialog-close:hover {
+  background: #f1f0ee !important;
+  border-color: #bdbab5 !important;
+  transform: translateY(-1px);
+}
+:root[data-theme="light"] input,
+:root[data-theme="light"] select,
+:root[data-theme="light"] option,
+:root[data-theme="light"] .url-input {
+  background: #ffffff !important;
+  border-color: #cfcfcc !important;
+  color: #1e1e1e !important;
+  -webkit-text-fill-color: #1e1e1e !important;
+  box-shadow: inset 0 1px 1px rgba(46,52,54,.03) !important;
+}
+:root[data-theme="light"] input::placeholder { color: #77767b !important; -webkit-text-fill-color: #77767b !important; opacity: 1; }
+:root[data-theme="light"] input:focus,
+:root[data-theme="light"] select:focus {
+  background: #fff !important;
+  border-color: #3584e4 !important;
+  box-shadow: 0 0 0 3px rgba(53,132,228,.18) !important;
+  outline: none;
+}
+:root[data-theme="light"] .select-wrap svg { color: #5e5c64 !important; }
+:root[data-theme="light"] .segmented { background: #e9e8e6 !important; border: 1px solid #deddda; }
+:root[data-theme="light"] .segment { color: #3d3846 !important; }
+:root[data-theme="light"] .segment:hover { background: rgba(255,255,255,.55) !important; }
+:root[data-theme="light"] .segment.is-selected {
+  background: #ffffff !important;
+  color: #1e1e1e !important;
+  box-shadow: 0 1px 3px rgba(46,52,54,.16), inset 0 0 0 1px #d1cfcc !important;
+}
+:root[data-theme="light"] .destination-row,
+:root[data-theme="light"] .setup-panel,
+:root[data-theme="light"] .media-preview,
+:root[data-theme="light"] .component-row,
+:root[data-theme="light"] .download-item {
+  background: #f8f7f6 !important;
+  border-color: #d8d6d2 !important;
+  color: #1e1e1e !important;
+}
+:root[data-theme="light"] .destination-row { border-style: solid; }
+:root[data-theme="light"] .text-button,
+:root[data-theme="light"] .cancel-button,
+:root[data-theme="light"] .footer-link { color: #1c71d8 !important; }
+:root[data-theme="light"] .text-button:hover,
+:root[data-theme="light"] .cancel-button:hover,
+:root[data-theme="light"] .footer-link:hover { color: #0d5db8 !important; }
+:root[data-theme="light"] .primary-button,
+:root[data-theme="light"] .update-primary,
+:root[data-theme="light"] .settings-footer .update-primary {
+  background: linear-gradient(180deg, #4a91e8, #3584e4) !important;
+  border: 1px solid #1c71d8 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  box-shadow: 0 3px 8px rgba(53,132,228,.25) !important;
+}
+:root[data-theme="light"] .primary-button:hover:not(:disabled),
+:root[data-theme="light"] .update-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #5a9bed, #1c71d8) !important;
+  box-shadow: 0 5px 12px rgba(53,132,228,.30) !important;
+  transform: translateY(-1px);
+}
+:root[data-theme="light"] button:disabled {
+  background: #e5e4e2 !important;
+  border-color: #d5d3d0 !important;
+  color: #8b898c !important;
+  -webkit-text-fill-color: #8b898c !important;
+  box-shadow: none !important;
+}
+:root[data-theme="light"] .status-badge,
+:root[data-theme="light"] .muted-pill {
+  background: #f1f0ee !important;
+  border-color: #d8d6d2 !important;
+  color: #5e5c64 !important;
+}
+:root[data-theme="light"] .status-badge.is-ready { background: #e8f7ef !important; border-color: #a9dbc2 !important; color: #18794e !important; }
+:root[data-theme="light"] .empty-icon,
+:root[data-theme="light"] .download-icon { background: #e9e8e6 !important; color: #5e5c64 !important; }
+:root[data-theme="light"] .settings-dialog::backdrop { background: rgba(46,52,54,.48) !important; backdrop-filter: blur(7px) saturate(.8); }
+:root[data-theme="light"] .settings-dialog[open] { animation: adwaita-dialog-in .18s cubic-bezier(.2,.8,.2,1); }
+:root[data-theme="light"] .check-setting input { accent-color: #3584e4; }
+:root[data-theme="light"] ::-webkit-scrollbar { width: 10px; }
+:root[data-theme="light"] ::-webkit-scrollbar-track { background: transparent; }
+:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: #c8c5c0; border: 3px solid transparent; border-radius: 999px; background-clip: padding-box; }
+
+@keyframes adwaita-dialog-in {
+  from { opacity: 0; transform: scale(.96) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.composer { animation: adwaita-card-in .28s cubic-bezier(.2,.8,.2,1) both; }
+.queue-card { animation: adwaita-card-in .34s .04s cubic-bezier(.2,.8,.2,1) both; }
+.composer:focus-within { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
+.segment:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status-dot { animation: status-breathe 2.4s ease-in-out infinite; }
+
+@keyframes adwaita-card-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes status-breathe {
+  50% { opacity: .55; transform: scale(.82); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) { --accent: #3584e4; --accent-contrast: #fff; --bg: #f6f5f4; --surface: #fff; --surface-2: #f1f0ee; --text: #1e1e1e; --muted: #5e5c64; --border: #d8d6d2; }
+  :root:not([data-theme]) body { background: radial-gradient(circle at 8% -8%, rgba(53,132,228,.10), transparent 28%), #f6f5f4; }
+  :root:not([data-theme]) .primary-button,
+  :root:not([data-theme]) .update-primary { background: linear-gradient(180deg, #4a91e8, #3584e4); border: 1px solid #1c71d8; color: #fff; }
+  :root:not([data-theme]) .brand-mark svg rect { fill: #3584e4; stroke: #3584e4; }
+}

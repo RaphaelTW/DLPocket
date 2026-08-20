@@ -25,6 +25,7 @@ DLPocket transforma o fluxo tradicional de comandos do `yt-dlp` em uma interface
 - Configurações persistentes de tema, idioma, qualidade, formato e comportamento final.
 - Interface em português, inglês, russo e espanhol.
 - Histórico persistente com opção para limpar downloads concluídos.
+- Tema claro inspirado no GNOME/Adwaita, com contraste consistente mesmo quando o Windows está no modo escuro.
 - Downloads organizados automaticamente em:
 
 ```text
