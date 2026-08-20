@@ -18,6 +18,13 @@ DLPocket transforma o fluxo tradicional de comandos do `yt-dlp` em uma interface
 - Botão para abrir rapidamente a pasta de destino.
 - Renderer Electron isolado, sem acesso direto ao Node.js.
 - Verificação e download seguro de novas versões com validação SHA-256.
+- Pré-visualização com título, thumbnail, duração e tamanho estimado.
+- Qualidade automática, 720p, 1080p, 1440p ou 4K, com seleção de FPS e codec.
+- Progresso geral dividido entre vídeo, áudio, mesclagem e conversão.
+- Atualização automática ou manual do yt-dlp com validação SHA-256.
+- Configurações persistentes de tema, idioma, qualidade, formato e comportamento final.
+- Interface em português, inglês, russo e espanhol.
+- Histórico persistente com opção para limpar downloads concluídos.
 - Downloads organizados automaticamente em:
 
 ```text

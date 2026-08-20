@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Interface desktop simples e segura para yt-dlp, feita em Electron, para baixar vídeos e extrair áudio sem terminal.",
   "main": "src/main.js",
-  "author": "Raphael Laurentino",
+  "author": "Laurentino",
   "license": "MIT",
   "private": false,
   "engines": {

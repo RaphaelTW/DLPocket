@@ -25,9 +25,14 @@
         </div>
       </div>
 
-      <button id="open-base-folder" class="icon-button" type="button" title="Abrir pasta DLPocket" aria-label="Abrir pasta DLPocket">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5h6l2 2h10v8.5A2 2 0 0 1 19 20H5a2 2 0 0 1-2-2V7.5Z"></path><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h6"></path></svg>
-      </button>
+      <div class="top-actions">
+        <button id="settings-button" class="icon-button" type="button" title="Configurações" aria-label="Configurações">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.13.36.34.7.6 1 .3.27.68.4 1.1.4h.09v4h-.09a1.7 1.7 0 0 0-1.7.6Z"></path></svg>
+        </button>
+        <button id="open-base-folder" class="icon-button" type="button" title="Abrir pasta DLPocket" aria-label="Abrir pasta DLPocket">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5h6l2 2h10v8.5A2 2 0 0 1 19 20H5a2 2 0 0 1-2-2V7.5Z"></path><path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h6"></path></svg>
+        </button>
+      </div>
     </header>
 
     <section id="update-card" class="update-card" hidden aria-live="polite">
@@ -61,6 +66,12 @@
       </div>
       <p id="url-error" class="field-error" role="alert" aria-live="polite"></p>
 
+      <div id="media-preview" class="media-preview" hidden>
+        <img id="preview-thumbnail" alt="" />
+        <div><strong id="preview-title"></strong><span id="preview-details"></span></div>
+        <span id="preview-size" class="preview-size"></span>
+      </div>
+
       <div class="choice-grid">
         <fieldset class="choice-group">
           <legend>O que deseja baixar?</legend>
@@ -91,6 +102,12 @@
         </div>
       </div>
 
+      <div id="video-options" class="tuning-grid">
+        <label><span>Qualidade</span><select id="quality-select"><option value="auto">Automática</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p</option><option value="2160">4K</option></select></label>
+        <label><span>FPS</span><select id="fps-select"><option value="auto">Automático</option><option value="30">Até 30 FPS</option><option value="60">Até 60 FPS</option></select></label>
+        <label><span>Codec</span><select id="codec-select"><option value="auto">Automático</option><option value="h264">H.264</option><option value="h265">H.265</option><option value="vp9">VP9</option><option value="av1">AV1</option></select></label>
+      </div>
+
       <div class="destination-row">
         <div>
           <span class="destination-label">Destino</span>
@@ -119,7 +136,7 @@
           <span class="eyebrow">Sessão atual</span>
           <h2 id="queue-heading">Downloads</h2>
         </div>
-        <span id="queue-count" class="muted-pill">0 itens</span>
+        <div class="queue-actions"><button id="clear-completed" class="text-button" type="button">Limpar concluídos</button><span id="queue-count" class="muted-pill">0 itens</span></div>
       </div>
 
       <div id="empty-state" class="empty-state">
@@ -138,6 +155,22 @@
       <button id="yt-dlp-link" class="footer-link" type="button">Powered by yt-dlp</button>
     </footer>
   </main>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <form method="dialog">
+      <div class="settings-header"><div><span class="eyebrow">DLPocket</span><h2>Configurações</h2></div><button class="dialog-close" value="cancel" aria-label="Fechar">×</button></div>
+      <div class="settings-grid">
+        <label><span>Tema</span><select id="setting-theme"><option value="system">Sistema</option><option value="dark">Escuro</option><option value="light">Claro</option></select></label>
+        <label><span>Idioma</span><select id="setting-language"><option value="system">Sistema</option><option value="pt-BR">Português</option><option value="en">English</option><option value="ru">Русский</option><option value="es">Español</option></select></label>
+        <label><span>Qualidade padrão</span><select id="setting-quality"><option value="auto">Automática</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p</option><option value="2160">4K</option></select></label>
+        <label><span>Formato padrão</span><select id="setting-format"><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option></select></label>
+        <label><span>Após concluir</span><select id="setting-completion"><option value="nothing">Não fazer nada</option><option value="folder">Abrir pasta</option></select></label>
+        <label class="check-setting"><input id="setting-auto-updates" type="checkbox" checked /><span>Atualizações automáticas</span></label>
+      </div>
+      <div class="component-row"><div><strong>yt-dlp</strong><span id="yt-dlp-version">Verificando…</span></div><button id="update-components" class="update-secondary" type="button">Atualizar componentes</button></div>
+      <div class="settings-footer"><button id="save-settings" class="update-primary" value="default">Salvar</button></div>
+    </form>
+  </dialog>
 
   <template id="download-item-template">
     <article class="download-item">

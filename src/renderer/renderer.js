@@ -6,7 +6,10 @@ const state = {
   format: 'mp4',
   downloads: new Map(),
   update: null,
-  updateFile: null
+  updateFile: null,
+  media: null,
+  history: [],
+  settings: { theme: 'system', language: 'system', quality: 'auto', format: 'mp4', autoUpdates: true, completion: 'nothing' }
 };
 
 const formats = {
@@ -53,6 +56,12 @@ const updateDownload = $('#update-download');
 const updateDismiss = $('#update-dismiss');
 const updateProgressTrack = updateCard.querySelector('.update-progress-track');
 const updateProgressBar = $('#update-progress-bar');
+const qualitySelect = $('#quality-select');
+const fpsSelect = $('#fps-select');
+const codecSelect = $('#codec-select');
+const mediaPreview = $('#media-preview');
+const settingsDialog = $('#settings-dialog');
+let inspectTimer = null;
 
 function prettyKind(kind) {
   return kind === 'audio' ? 'Áudio' : 'Vídeo';
@@ -83,13 +92,18 @@ function renderFormats() {
     option.textContent = label;
     formatSelect.appendChild(option);
   }
-  state.format = formats[state.kind][0][0];
+  const preferred = state.settings.format;
+  formatSelect.value = formats[state.kind].some(([value]) => value === preferred) ? preferred : formats[state.kind][0][0];
+  state.format = formatSelect.value;
   updateComposerCopy();
+  updateEstimate();
 }
 
 function updateComposerCopy() {
   state.format = formatSelect.value;
-  downloadButtonText.textContent = `Baixar ${state.kind === 'audio' ? 'áudio' : 'vídeo'}`;
+  $('#video-options').hidden = state.kind === 'audio';
+  const copy = translations?.[resolvedLanguage?.(state.settings.language)] || translations?.['pt-BR'];
+  downloadButtonText.textContent = copy ? `${copy.download} ${state.kind === 'audio' ? copy.audio.toLowerCase() : copy.video.toLowerCase()}` : `Baixar ${state.kind === 'audio' ? 'áudio' : 'vídeo'}`;
   if (state.appInfo?.downloads) {
     destinationPath.textContent = state.kind === 'audio' ? state.appInfo.downloads.audio : state.appInfo.downloads.video;
   } else {
@@ -128,6 +142,60 @@ function shortUrl(raw) {
   }
 }
 
+function formatDuration(seconds) {
+  if (!seconds) return '—';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remaining = Math.floor(seconds % 60);
+  return [hours, minutes, remaining].filter((_, index) => hours || index > 0).map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+function codecMatches(vcodec, selected) {
+  const value = String(vcodec || '').toLowerCase();
+  if (selected === 'auto') return true;
+  if (selected === 'h264') return value.startsWith('avc');
+  if (selected === 'h265') return /^(hevc|hvc1|hev1)/.test(value);
+  if (selected === 'vp9') return value.startsWith('vp9');
+  return selected === 'av1' ? value.startsWith('av01') : true;
+}
+
+function updateEstimate() {
+  if (!state.media) return;
+  const maxHeight = qualitySelect.value === 'auto' ? Infinity : Number(qualitySelect.value);
+  const maxFps = fpsSelect.value === 'auto' ? Infinity : Number(fpsSelect.value);
+  const eligibleVideos = state.media.formats.filter((item) => item.vcodec && item.vcodec !== 'none' && (!item.height || item.height <= maxHeight) && (!item.fps || item.fps <= maxFps));
+  const codecVideos = eligibleVideos.filter((item) => codecMatches(item.vcodec, codecSelect.value));
+  const videos = codecVideos.length ? codecVideos : eligibleVideos;
+  const audios = state.media.formats.filter((item) => item.acodec && item.acodec !== 'none' && (!item.vcodec || item.vcodec === 'none'));
+  const videoSize = Math.max(0, ...videos.map((item) => Number(item.filesize) || 0));
+  const audioSize = Math.max(0, ...audios.map((item) => Number(item.filesize) || 0));
+  const bytes = state.kind === 'audio' ? audioSize : videoSize + audioSize;
+  $('#preview-size').textContent = bytes ? `~ ${(bytes / 1048576).toFixed(bytes > 104857600 ? 0 : 1)} MB` : 'Tamanho indisponível';
+}
+
+async function inspectCurrentUrl() {
+  if (!validateUrl()) return;
+  mediaPreview.hidden = false;
+  $('#preview-title').textContent = 'Carregando informações…';
+  $('#preview-details').textContent = '';
+  $('#preview-size').textContent = '';
+  try {
+    const media = await window.dlpocket.inspectMedia(urlInput.value.trim());
+    state.media = media;
+    $('#preview-title').textContent = media.title;
+    $('#preview-details').textContent = [media.uploader, formatDuration(media.duration)].filter(Boolean).join(' • ');
+    const thumbnail = $('#preview-thumbnail');
+    thumbnail.hidden = !media.thumbnail;
+    if (media.thumbnail) thumbnail.src = media.thumbnail;
+    updateEstimate();
+  } catch (error) {
+    state.media = null;
+    $('#preview-title').textContent = error?.message || 'Não foi possível carregar as informações.';
+    $('#preview-details').textContent = '';
+    $('#preview-size').textContent = '';
+  }
+}
+
 function updateQueueCount() {
   const count = state.downloads.size;
   queueCount.textContent = `${count} ${count === 1 ? 'item' : 'itens'}`;
@@ -146,8 +214,8 @@ function createDownloadItem(tempId, payload) {
   const cancel = fragment.querySelector('.cancel-button');
 
   icon.textContent = payload.kind === 'audio' ? '♪' : '▶';
-  title.textContent = shortUrl(payload.url);
-  meta.textContent = `${prettyKind(payload.kind)} • ${payload.format.toUpperCase()}`;
+  title.textContent = payload.title || shortUrl(payload.url);
+  meta.textContent = `${prettyKind(payload.kind)} • ${payload.format.toUpperCase()}${payload.kind === 'video' ? ` • ${payload.quality === 'auto' ? 'Auto' : `${payload.quality}p`}` : ''}`;
   cancel.dataset.downloadId = tempId;
   cancel.addEventListener('click', async () => {
     const id = cancel.dataset.downloadId;
@@ -189,7 +257,11 @@ async function beginDownload() {
   const payload = {
     url: urlInput.value.trim(),
     kind: state.kind,
-    format: formatSelect.value
+    format: formatSelect.value,
+    quality: qualitySelect.value,
+    fps: fpsSelect.value,
+    codec: codecSelect.value,
+    title: state.media?.title || null
   };
 
   const tempId = `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -208,6 +280,8 @@ async function beginDownload() {
     state.downloads.set(result.id, { payload, ui });
     ui.cancel.dataset.downloadId = result.id;
     urlInput.value = '';
+    state.media = null;
+    mediaPreview.hidden = true;
     showUrlError('');
   } catch (error) {
     ui.root.classList.add('is-error');
@@ -219,6 +293,16 @@ async function beginDownload() {
     downloadButton.disabled = state.preparing;
   }
 }
+
+function saveHistory(entry) {
+  state.history = [entry, ...state.history.filter((item) => item.id !== entry.id)].slice(0, 200);
+  window.dlpocket.setHistory(state.history).catch(() => {});
+}
+
+const stageLabels = {
+  video: 'Baixando vídeo', audio: 'Baixando áudio', merging: 'Mesclando vídeo e áudio',
+  converting: 'Convertendo formato', complete: 'Concluído'
+};
 
 function handleDownloadEvent(event) {
   const item = state.downloads.get(event.id);
@@ -234,7 +318,13 @@ function handleDownloadEvent(event) {
     const parts = [];
     if (event.speed) parts.push(event.speed);
     if (event.eta && event.eta !== 'NA') parts.push(`restam ${event.eta}`);
-    ui.status.textContent = parts.join(' • ') || 'Baixando…';
+    ui.status.textContent = `${stageLabels[event.stage] || 'Baixando'}${parts.length ? ` • ${parts.join(' • ')}` : ''}`;
+  } else if (event.type === 'stage') {
+    if (Number.isFinite(event.percent)) {
+      ui.bar.style.width = `${event.percent}%`;
+      ui.percent.textContent = `${Math.round(event.percent)}%`;
+    }
+    ui.status.textContent = stageLabels[event.stage] || 'Processando';
   } else if (event.type === 'status') {
     ui.status.textContent = event.message.replace(/^\[[^\]]+\]\s*/, '').slice(0, 120);
   } else if (event.type === 'complete') {
@@ -248,6 +338,8 @@ function handleDownloadEvent(event) {
     ui.cancel.disabled = false;
     ui.cancel.dataset.downloadId = '';
     ui.cancel.onclick = () => window.dlpocket.openDownloadsFolder(item.payload.kind);
+    saveHistory({ id: event.id, ...item.payload, file: event.file || null, completedAt: new Date().toISOString(), status: 'complete' });
+    if (state.settings.completion === 'folder') window.dlpocket.openDownloadsFolder(item.payload.kind);
   } else if (event.type === 'error') {
     ui.root.classList.add('is-error');
     ui.icon.textContent = '!';
@@ -290,13 +382,105 @@ function handleUpdateEvent(event) {
   updateMessage.textContent = `Baixando: ${(event.received / 1048576).toFixed(1)} MB${size}`;
 }
 
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === 'system' ? '' : theme;
+}
+
+const translations = {
+  'pt-BR': { paste: 'Colar', download: 'Baixar', settings: 'Configurações', clear: 'Limpar concluídos', link: 'Cole o link do download aqui', newDownload: 'Novo download', session: 'Sessão atual', downloads: 'Downloads', save: 'Salvar', updateComponents: 'Atualizar componentes', heading: 'Cole o link', linkLabel: 'Link do vídeo ou mídia', choose: 'O que deseja baixar?', video: 'Vídeo', audio: 'Áudio', format: 'Formato', quality: 'Qualidade', destination: 'Destino', openFolder: 'Abrir pasta', empty: 'Nenhum download ainda', emptyHelp: 'Seus downloads aparecerão aqui.', theme: 'Tema', language: 'Idioma', defaultQuality: 'Qualidade padrão', defaultFormat: 'Formato padrão', completion: 'Após concluir', automaticUpdates: 'Atualizações automáticas' },
+  en: { paste: 'Paste', download: 'Download', settings: 'Settings', clear: 'Clear completed', link: 'Paste the download link here', newDownload: 'New download', session: 'Current session', downloads: 'Downloads', save: 'Save', updateComponents: 'Update components', heading: 'Paste the link', linkLabel: 'Video or media link', choose: 'What do you want to download?', video: 'Video', audio: 'Audio', format: 'Format', quality: 'Quality', destination: 'Destination', openFolder: 'Open folder', empty: 'No downloads yet', emptyHelp: 'Your downloads will appear here.', theme: 'Theme', language: 'Language', defaultQuality: 'Default quality', defaultFormat: 'Default format', completion: 'After completion', automaticUpdates: 'Automatic updates' },
+  ru: { paste: 'Вставить', download: 'Скачать', settings: 'Настройки', clear: 'Очистить завершённые', link: 'Вставьте ссылку для скачивания', newDownload: 'Новая загрузка', session: 'Текущая сессия', downloads: 'Загрузки', save: 'Сохранить', updateComponents: 'Обновить компоненты', heading: 'Вставьте ссылку', linkLabel: 'Ссылка на видео или медиа', choose: 'Что вы хотите скачать?', video: 'Видео', audio: 'Аудио', format: 'Формат', quality: 'Качество', destination: 'Папка', openFolder: 'Открыть папку', empty: 'Загрузок пока нет', emptyHelp: 'Ваши загрузки появятся здесь.', theme: 'Тема', language: 'Язык', defaultQuality: 'Качество по умолчанию', defaultFormat: 'Формат по умолчанию', completion: 'После завершения', automaticUpdates: 'Автоматические обновления' },
+  es: { paste: 'Pegar', download: 'Descargar', settings: 'Configuración', clear: 'Limpiar completados', link: 'Pegue aquí el enlace de descarga', newDownload: 'Nueva descarga', session: 'Sesión actual', downloads: 'Descargas', save: 'Guardar', updateComponents: 'Actualizar componentes', heading: 'Pegue el enlace', linkLabel: 'Enlace del vídeo o medio', choose: '¿Qué desea descargar?', video: 'Vídeo', audio: 'Audio', format: 'Formato', quality: 'Calidad', destination: 'Destino', openFolder: 'Abrir carpeta', empty: 'Aún no hay descargas', emptyHelp: 'Sus descargas aparecerán aquí.', theme: 'Tema', language: 'Idioma', defaultQuality: 'Calidad predeterminada', defaultFormat: 'Formato predeterminado', completion: 'Al finalizar', automaticUpdates: 'Actualizaciones automáticas' }
+};
+
+function resolvedLanguage(language) {
+  if (language !== 'system') return language;
+  const locale = navigator.language.toLowerCase();
+  if (locale.startsWith('ru')) return 'ru';
+  if (locale.startsWith('es')) return 'es';
+  if (locale.startsWith('en')) return 'en';
+  return 'pt-BR';
+}
+
+function applyLanguage(language) {
+  const copy = translations[resolvedLanguage(language)] || translations['pt-BR'];
+  document.documentElement.lang = resolvedLanguage(language);
+  urlInput.placeholder = copy.link;
+  $('#paste-button').textContent = copy.paste;
+  $('#settings-button').title = copy.settings;
+  $('#settings-dialog h2').textContent = copy.settings;
+  $('#clear-completed').textContent = copy.clear;
+  document.querySelector('.composer .eyebrow').textContent = copy.newDownload;
+  document.querySelector('.queue-card .eyebrow').textContent = copy.session;
+  $('#queue-heading').textContent = copy.downloads;
+  $('#save-settings').textContent = copy.save;
+  $('#update-components').textContent = copy.updateComponents;
+  $('#download-heading').textContent = copy.heading;
+  document.querySelector('label[for="url-input"]').textContent = copy.linkLabel;
+  document.querySelector('.choice-group legend').textContent = copy.choose;
+  document.querySelectorAll('.segment span:last-child')[0].textContent = copy.video;
+  document.querySelectorAll('.segment span:last-child')[1].textContent = copy.audio;
+  document.querySelector('label[for="format-select"]').textContent = copy.format;
+  document.querySelector('#video-options label:first-child span').textContent = copy.quality;
+  $('.destination-label').textContent = copy.destination;
+  $('#open-current-folder').textContent = copy.openFolder;
+  $('#empty-state strong').textContent = copy.empty;
+  $('#empty-state p').textContent = copy.emptyHelp;
+  document.querySelector('#setting-theme').previousElementSibling.textContent = copy.theme;
+  document.querySelector('#setting-language').previousElementSibling.textContent = copy.language;
+  document.querySelector('#setting-quality').previousElementSibling.textContent = copy.defaultQuality;
+  document.querySelector('#setting-format').previousElementSibling.textContent = copy.defaultFormat;
+  document.querySelector('#setting-completion').previousElementSibling.textContent = copy.completion;
+  document.querySelector('.check-setting span').textContent = copy.automaticUpdates;
+  updateComposerCopy();
+}
+
+async function loadPreferences() {
+  const [settings, history] = await Promise.all([window.dlpocket.getSettings(), window.dlpocket.getHistory()]);
+  state.settings = { ...state.settings, ...settings };
+  state.history = Array.isArray(history) ? history : [];
+  applyTheme(state.settings.theme);
+  applyLanguage(state.settings.language);
+  qualitySelect.value = state.settings.quality;
+}
+
+function restoreHistory() {
+  for (const entry of state.history.slice().reverse()) {
+    const ui = createDownloadItem(entry.id, entry);
+    ui.root.classList.add('is-complete', 'is-history');
+    ui.icon.textContent = '✓';
+    ui.percent.textContent = '100%';
+    ui.bar.style.width = '100%';
+    ui.status.textContent = new Date(entry.completedAt).toLocaleString();
+    ui.cancel.textContent = 'Abrir pasta';
+    ui.cancel.dataset.downloadId = '';
+    ui.cancel.onclick = () => window.dlpocket.openDownloadsFolder(entry.kind);
+    state.downloads.set(entry.id, { payload: entry, ui, history: true });
+  }
+  updateQueueCount();
+}
+
+async function refreshComponentVersion(auto = false) {
+  try {
+    const result = auto ? await window.dlpocket.updateYtDlp(false) : await window.dlpocket.getComponentVersions();
+    $('#yt-dlp-version').textContent = result.ytDlpVersion ? `v${result.ytDlpVersion}` : 'Não instalado';
+    if (auto) {
+      state.settings.lastComponentCheck = Date.now();
+      window.dlpocket.setSettings(state.settings).catch(() => {});
+    }
+  } catch (error) {
+    $('#yt-dlp-version').textContent = error?.message || 'Indisponível';
+  }
+}
+
 async function checkForUpdates() {
   try {
     const release = await window.dlpocket.checkForUpdates();
     if (!release.available) return;
     state.update = release;
     updateTitle.textContent = `DLPocket v${release.version} disponível`;
-    updateMessage.textContent = `Você está usando a v${release.currentVersion}. Deseja baixar a nova versão?`;
+    const notes = String(release.notes || '').replace(/[#*_`>-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 220);
+    updateMessage.textContent = notes || `Você está usando a v${release.currentVersion}. Deseja baixar a nova versão?`;
     updateCard.hidden = false;
   } catch {
     // A verificação é silenciosa para não interromper o uso offline.
@@ -321,6 +505,8 @@ async function downloadAvailableUpdate() {
     updateMessage.textContent = 'Download verificado. Abra o instalador para concluir a atualização.';
     updateDownload.textContent = 'Abrir instalador';
     updateDownload.disabled = false;
+    updateDismiss.hidden = false;
+    updateDismiss.textContent = 'Instalar ao fechar';
   } catch (error) {
     updateTitle.textContent = 'Falha na atualização';
     updateMessage.textContent = error?.message || 'Não foi possível baixar a nova versão.';
@@ -335,6 +521,7 @@ async function init() {
   window.dlpocket.onDependencyEvent(handleDependencyEvent);
   window.dlpocket.onUpdateEvent(handleUpdateEvent);
 
+  await loadPreferences();
   state.appInfo = await window.dlpocket.getAppInfo();
   $('#app-version').textContent = `DLPocket v${state.appInfo.version}`;
   updateComposerCopy();
@@ -346,7 +533,10 @@ async function init() {
   } catch {
     setDependencyBadge('is-error', 'Status indisponível');
   }
-  setTimeout(checkForUpdates, 1200);
+  restoreHistory();
+  const componentCheckDue = !state.settings.lastComponentCheck || Date.now() - state.settings.lastComponentCheck > 24 * 60 * 60 * 1000;
+  refreshComponentVersion(state.settings.autoUpdates && componentCheckDue);
+  if (state.settings.autoUpdates) setTimeout(checkForUpdates, 1200);
 }
 
 document.querySelectorAll('input[name="kind"]').forEach((input) => {
@@ -358,7 +548,13 @@ document.querySelectorAll('input[name="kind"]').forEach((input) => {
 });
 
 formatSelect.addEventListener('change', updateComposerCopy);
-urlInput.addEventListener('input', () => showUrlError(''));
+urlInput.addEventListener('input', () => {
+  showUrlError('');
+  state.media = null;
+  mediaPreview.hidden = true;
+  clearTimeout(inspectTimer);
+  if (/^https?:\/\//i.test(urlInput.value.trim())) inspectTimer = setTimeout(inspectCurrentUrl, 650);
+});
 urlInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') beginDownload();
 });
@@ -368,6 +564,7 @@ $('#paste-button').addEventListener('click', async () => {
     urlInput.value = text.trim();
     showUrlError('');
     urlInput.focus();
+    if (/^https?:\/\//i.test(urlInput.value)) inspectCurrentUrl();
   } catch {
     showUrlError('Não foi possível ler a área de transferência. Use Ctrl+V.');
   }
@@ -377,6 +574,66 @@ $('#open-base-folder').addEventListener('click', () => window.dlpocket.openDownl
 $('#open-current-folder').addEventListener('click', () => window.dlpocket.openDownloadsFolder(selectedFolderKind()));
 $('#yt-dlp-link').addEventListener('click', () => window.dlpocket.openYtDlpRepository());
 updateDownload.addEventListener('click', downloadAvailableUpdate);
-updateDismiss.addEventListener('click', () => { updateCard.hidden = true; });
+updateDismiss.addEventListener('click', async () => {
+  if (state.updateFile) {
+    await window.dlpocket.installUpdateOnQuit(state.updateFile);
+    updateDismiss.textContent = 'Instalação agendada';
+    updateDismiss.disabled = true;
+  } else updateCard.hidden = true;
+});
+qualitySelect.addEventListener('change', updateEstimate);
+fpsSelect.addEventListener('change', updateEstimate);
+codecSelect.addEventListener('change', updateEstimate);
+$('#settings-button').addEventListener('click', async () => {
+  $('#setting-theme').value = state.settings.theme;
+  $('#setting-language').value = state.settings.language;
+  $('#setting-quality').value = state.settings.quality;
+  $('#setting-format').value = state.settings.format;
+  $('#setting-completion').value = state.settings.completion;
+  $('#setting-auto-updates').checked = state.settings.autoUpdates;
+  settingsDialog.showModal();
+  refreshComponentVersion(false);
+});
+$('#save-settings').addEventListener('click', async (event) => {
+  event.preventDefault();
+  state.settings = {
+    ...state.settings,
+    theme: $('#setting-theme').value,
+    language: $('#setting-language').value,
+    quality: $('#setting-quality').value,
+    format: $('#setting-format').value,
+    completion: $('#setting-completion').value,
+    autoUpdates: $('#setting-auto-updates').checked
+  };
+  await window.dlpocket.setSettings(state.settings);
+  applyTheme(state.settings.theme);
+  applyLanguage(state.settings.language);
+  qualitySelect.value = state.settings.quality;
+  if (formats[state.kind].some(([value]) => value === state.settings.format)) {
+    formatSelect.value = state.settings.format;
+    updateComposerCopy();
+  }
+  settingsDialog.close();
+});
+$('#update-components').addEventListener('click', async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Atualizando…';
+  await refreshComponentVersion(true);
+  button.disabled = false;
+  applyLanguage(state.settings.language);
+});
+$('#clear-completed').addEventListener('click', () => {
+  for (const [id, item] of state.downloads) {
+    if (item.ui.root.classList.contains('is-complete')) {
+      item.ui.root.remove();
+      state.downloads.delete(id);
+    }
+  }
+  state.history = [];
+  window.dlpocket.setHistory([]).catch(() => {});
+  updateQueueCount();
+});
 
 init();

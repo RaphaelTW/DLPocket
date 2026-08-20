@@ -14,6 +14,8 @@ const RELEASES_API = 'https://api.github.com/repos/RaphaelTW/DLPocket/releases/l
 const activeDownloads = new Map();
 let mainWindow = null;
 let preparingDependencies = null;
+let pendingUpdateInstaller = null;
+let openingPendingInstaller = false;
 
 const DOWNLOAD_SOURCES = {
   ytDlp: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
@@ -24,6 +26,24 @@ const DOWNLOAD_SOURCES = {
 
 function getBinDir() {
   return path.join(app.getPath('userData'), 'bin');
+}
+
+function getStatePath(filename) {
+  return path.join(app.getPath('userData'), filename);
+}
+
+async function readJsonState(filename, fallback) {
+  try { return JSON.parse(await fsp.readFile(getStatePath(filename), 'utf8')); } catch { return fallback; }
+}
+
+async function writeJsonState(filename, value) {
+  const destination = getStatePath(filename);
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+  const temporary = `${destination}.tmp`;
+  await fsp.writeFile(temporary, JSON.stringify(value, null, 2), 'utf8');
+  await fsp.rm(destination, { force: true });
+  await fsp.rename(temporary, destination);
+  return value;
 }
 
 function getDependencyPaths() {
@@ -71,7 +91,8 @@ async function checkForUpdates() {
     currentVersion: app.getVersion(), version, name: installer.name,
     downloadUrl: installer.browser_download_url,
     checksumUrl: checksums.browser_download_url,
-    releaseUrl: release.html_url
+    releaseUrl: release.html_url,
+    notes: String(release.body || '').slice(0, 12000)
   };
 }
 
@@ -89,6 +110,16 @@ async function downloadUpdate(_event, release) {
   const destination = path.join(dirs.updates, filename);
   const checksumText = await fetchText(checksumUrl.toString(), 'checksum da atualização');
   const expected = parseExpectedSha256(checksumText, filename);
+  try {
+    if (await sha256File(destination) === expected) {
+      sendToRenderer('update:event', { type: 'complete', filePath: destination, cached: true });
+      return { filePath: destination, cached: true };
+    }
+  } catch { /* arquivo ausente ou inválido */ }
+  const oldInstallers = await fsp.readdir(dirs.updates).catch(() => []);
+  await Promise.all(oldInstallers
+    .filter((name) => /^DLPocket-Setup-.*\.exe$/i.test(name) && name !== filename)
+    .map((name) => fsp.rm(path.join(dirs.updates, name), { force: true })));
   const partial = `${destination}.part`;
   await fsp.rm(partial, { force: true });
   const response = await net.fetch(downloadUrl.toString(), { redirect: 'follow' });
@@ -249,6 +280,36 @@ function spawnAndWait(command, args, options = {}) {
   });
 }
 
+function spawnAndCapture(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...options });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+      if (stdout.length > 25_000_000) child.kill();
+    });
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString('utf8')).slice(-20000); });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `Processo encerrado com código ${code}.`)));
+  });
+}
+
+function friendlyDownloadError(message) {
+  const text = String(message || '');
+  const rules = [
+    [/private video|private/i, 'Este vídeo é privado. Entre na conta autorizada pelo navegador e tente novamente.'],
+    [/members-only|login required|sign in|cookies/i, 'Este conteúdo exige login ou cookies de uma conta autorizada.'],
+    [/not available in your country|geo.?restrict|region/i, 'Este conteúdo possui restrição regional e não está disponível na sua localização.'],
+    [/unsupported url|no suitable extractor/i, 'Este link não é suportado pelo yt-dlp.'],
+    [/video unavailable|content is not available|removed/i, 'O conteúdo não está disponível, foi removido ou o endereço expirou.'],
+    [/no space left|disk full|not enough space/i, 'Não há espaço suficiente no disco para concluir o download.'],
+    [/ffmpeg.*not found|ffprobe.*not found/i, 'FFmpeg ou FFprobe não está disponível. Atualize os componentes nas configurações.'],
+    [/timed out|network|connection|unable to download|temporary failure/i, 'Falha de conexão. Verifique sua internet e tente novamente.']
+  ];
+  return rules.find(([pattern]) => pattern.test(text))?.[1] || text.split(/\r?\n/).filter(Boolean).pop()?.slice(0, 240) || 'O download não pôde ser concluído.';
+}
+
 async function findFileRecursive(root, filename) {
   const stack = [root];
   while (stack.length) {
@@ -348,6 +409,67 @@ async function prepareDependencies(force = false) {
   }
 }
 
+async function getComponentVersions() {
+  const status = await dependencyStatus();
+  if (!status.ytDlp) return { ...status, ytDlpVersion: null };
+  try {
+    const version = (await spawnAndCapture(getDependencyPaths().ytDlp, ['--version'])).trim();
+    return { ...status, ytDlpVersion: version };
+  } catch { return { ...status, ytDlpVersion: null }; }
+}
+
+async function updateYtDlp(force = false) {
+  const deps = getDependencyPaths();
+  const current = await getComponentVersions();
+  const response = await net.fetch('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest', {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `${APP_NAME}/${app.getVersion()}` }
+  });
+  if (!response.ok) throw new Error(`Falha ao verificar o yt-dlp (HTTP ${response.status}).`);
+  const release = await response.json();
+  const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
+  if (!force && current.ytDlpVersion === latestVersion) return { ...current, latestVersion, updated: false };
+  sendToRenderer('deps:event', { type: 'stage', stage: 'Atualizando yt-dlp' });
+  await downloadVerifiedFile(DOWNLOAD_SOURCES.ytDlp, deps.ytDlp, 'yt-dlp', DOWNLOAD_SOURCES.ytDlpChecksums, 'yt-dlp.exe');
+  const updated = await getComponentVersions();
+  return { ...updated, latestVersion, updated: true };
+}
+
+async function inspectMedia(_event, rawUrl) {
+  const url = validateUrl(rawUrl);
+  await prepareDependencies(false);
+  const deps = getDependencyPaths();
+  const output = await spawnAndCapture(deps.ytDlp, [
+    '--dump-single-json', '--skip-download', '--no-playlist', '--no-warnings',
+    '--ffmpeg-location', deps.binDir, '--js-runtimes', `node:${process.execPath}`, url
+  ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+  const info = JSON.parse(output);
+  let thumbnail = null;
+  if (typeof info.thumbnail === 'string' && /^https?:\/\//.test(info.thumbnail)) {
+    try {
+      const imageResponse = await net.fetch(info.thumbnail, { redirect: 'follow' });
+      const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+      const bytes = Buffer.from(await imageResponse.arrayBuffer());
+      if (imageResponse.ok && bytes.length <= 5_000_000) thumbnail = `data:${contentType};base64,${bytes.toString('base64')}`;
+    } catch { thumbnail = null; }
+  }
+  const formats = Array.isArray(info.formats) ? info.formats.map((format) => ({
+    formatId: format.format_id,
+    height: format.height || null,
+    fps: format.fps || null,
+    vcodec: format.vcodec || null,
+    acodec: format.acodec || null,
+    filesize: format.filesize || format.filesize_approx || null,
+    ext: format.ext || null
+  })) : [];
+  return {
+    title: String(info.title || 'Mídia sem título').slice(0, 300),
+    thumbnail,
+    duration: Number(info.duration) || null,
+    uploader: String(info.uploader || info.channel || '').slice(0, 160),
+    formats
+  };
+}
+
 function validateUrl(raw) {
   if (typeof raw !== 'string' || raw.length > 4096) {
     throw new Error('Link inválido.');
@@ -368,8 +490,11 @@ const FORMAT_ALLOWLIST = {
   video: new Set(['mp4', 'mkv', 'webm', 'mov', 'avi', 'flv']),
   audio: new Set(['mp3', 'm4a', 'wav', 'flac', 'opus', 'aac', 'alac', 'vorbis'])
 };
+const QUALITY_ALLOWLIST = new Set(['auto', '720', '1080', '1440', '2160']);
+const FPS_ALLOWLIST = new Set(['auto', '30', '60']);
+const CODEC_ALLOWLIST = new Set(['auto', 'h264', 'h265', 'vp9', 'av1']);
 
-function buildYtDlpArgs({ url, kind, format, targetDir, deps }) {
+function buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, deps }) {
   const args = [
     '--no-colors',
     '--newline',
@@ -388,22 +513,32 @@ function buildYtDlpArgs({ url, kind, format, targetDir, deps }) {
 
   if (kind === 'audio') {
     args.push('-x', '--audio-format', format, '--audio-quality', '0');
-  } else if (format === 'mp4') {
+  } else {
+    const heightFilter = quality === 'auto' ? '' : `[height<=${quality}]`;
+    const fpsFilter = fps === 'auto' ? '' : `[fps<=${fps}]`;
+    const codecFilters = {
+      auto: '', h264: '[vcodec^=avc]', h265: '[vcodec~=(?i)^(hevc|hvc1|hev1)]',
+      vp9: '[vcodec^=vp9]', av1: '[vcodec^=av01]'
+    };
+    const preferred = `bv*${heightFilter}${fpsFilter}${codecFilters[codec]}+ba`;
+    const fallback = `bv*${heightFilter}${fpsFilter}+ba/b${heightFilter}${fpsFilter}`;
+    args.push('-f', `${preferred}/${fallback}`);
+  }
+
+  if (kind === 'video' && format === 'mp4') {
     args.push(
-      '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
       '--merge-output-format', 'mp4',
       '--remux-video', 'mp4'
     );
-  } else if (format === 'webm') {
+  } else if (kind === 'video' && format === 'webm') {
     args.push(
-      '-f', 'bv*[ext=webm]+ba[ext=webm]/b[ext=webm]/bv*+ba/b',
       '--merge-output-format', 'webm',
       '--remux-video', 'webm'
     );
-  } else if (format === 'mkv') {
-    args.push('-f', 'bv*+ba/b', '--merge-output-format', 'mkv', '--remux-video', 'mkv');
-  } else {
-    args.push('-f', 'bv*+ba/b', '--merge-output-format', 'mkv', '--recode-video', format);
+  } else if (kind === 'video' && format === 'mkv') {
+    args.push('--merge-output-format', 'mkv', '--remux-video', 'mkv');
+  } else if (kind === 'video') {
+    args.push('--merge-output-format', 'mkv', '--recode-video', format);
   }
 
   args.push(url);
@@ -418,6 +553,9 @@ async function startDownload(event, payload) {
   if (!payload || typeof payload !== 'object') throw new Error('Dados de download inválidos.');
   const kind = payload.kind === 'audio' ? 'audio' : payload.kind === 'video' ? 'video' : null;
   const format = typeof payload.format === 'string' ? payload.format.toLowerCase() : '';
+  const quality = QUALITY_ALLOWLIST.has(String(payload.quality)) ? String(payload.quality) : 'auto';
+  const fps = FPS_ALLOWLIST.has(String(payload.fps)) ? String(payload.fps) : 'auto';
+  const codec = CODEC_ALLOWLIST.has(String(payload.codec)) ? String(payload.codec) : 'auto';
   if (!kind || !FORMAT_ALLOWLIST[kind].has(format)) throw new Error('Formato não permitido.');
   const url = validateUrl(payload.url);
 
@@ -427,7 +565,7 @@ async function startDownload(event, payload) {
   const dirs = await ensureDownloadDirs();
   const targetDir = kind === 'video' ? dirs.video : dirs.audio;
   const id = crypto.randomUUID();
-  const args = buildYtDlpArgs({ url, kind, format, targetDir, deps });
+  const args = buildYtDlpArgs({ url, kind, format, quality, fps, codec, targetDir, deps });
 
   const child = spawn(deps.ytDlp, args, {
     windowsHide: true,
@@ -448,6 +586,8 @@ async function startDownload(event, payload) {
 
   let stderrTail = '';
   let outputFile = null;
+  let transferPass = 0;
+  let previousRawPercent = 0;
   const consume = (chunk, isError = false) => {
     const text = chunk.toString('utf8');
     if (isError) stderrTail = (stderrTail + text).slice(-12000);
@@ -457,14 +597,28 @@ async function startDownload(event, payload) {
       if (line.startsWith('__DLPOCKET_PROGRESS__:')) {
         const data = line.slice('__DLPOCKET_PROGRESS__:'.length).split('|');
         const percent = Number.parseFloat((data[0] || '').replace('%', '').trim());
+        if (kind === 'video' && Number.isFinite(percent) && previousRawPercent > 80 && percent < 25) transferPass = 1;
+        if (Number.isFinite(percent)) previousRawPercent = percent;
+        const stage = kind === 'audio' ? 'audio' : transferPass === 0 ? 'video' : 'audio';
+        const overallPercent = Number.isFinite(percent)
+          ? (kind === 'audio' ? percent * 0.9 : transferPass === 0 ? percent * 0.75 : 75 + percent * 0.15)
+          : null;
         emit({
           type: 'progress',
-          percent: Number.isFinite(percent) ? percent : null,
+          percent: overallPercent,
+          stage,
+          stagePercent: Number.isFinite(percent) ? percent : null,
           speed: (data[1] || '').trim() || null,
           eta: (data[2] || '').trim() || null
         });
       } else if (line.startsWith('__DLPOCKET_FILE__:')) {
         outputFile = line.slice('__DLPOCKET_FILE__:'.length).trim();
+      } else if (line.startsWith('[Merger]')) {
+        emit({ type: 'stage', stage: 'merging', percent: 94 });
+      } else if (line.startsWith('[ExtractAudio]')) {
+        emit({ type: 'stage', stage: 'converting', percent: 92 });
+      } else if (line.startsWith('[VideoConvertor]') || line.startsWith('[VideoRemuxer]')) {
+        emit({ type: 'stage', stage: 'converting', percent: 94 });
       } else if (line.startsWith('[download]') || line.startsWith('[ExtractAudio]') || line.startsWith('[Merger]') || line.startsWith('[VideoConvertor]')) {
         emit({ type: 'status', message: line.slice(0, 220) });
       }
@@ -475,7 +629,7 @@ async function startDownload(event, payload) {
   readline.createInterface({ input: child.stderr }).on('line', (line) => consume(`${line}\n`, true));
   child.on('error', (error) => {
     activeDownloads.delete(id);
-    emit({ type: 'error', message: error.message });
+    emit({ type: 'error', message: friendlyDownloadError(error.message) });
   });
   child.on('close', (code, signal) => {
     activeDownloads.delete(id);
@@ -492,7 +646,7 @@ async function startDownload(event, payload) {
         .filter(Boolean)
         .slice(-5)
         .join('\n');
-      emit({ type: 'error', message: usefulError || `yt-dlp encerrou com código ${code}.` });
+      emit({ type: 'error', message: friendlyDownloadError(usefulError || `yt-dlp encerrou com código ${code}.`) });
     }
   });
 
@@ -557,6 +711,13 @@ app.whenReady().then(() => {
   safeHandle('clipboard:read', () => clipboard.readText());
   safeHandle('deps:status', () => dependencyStatus());
   safeHandle('deps:prepare', (_event, force) => prepareDependencies(Boolean(force)));
+  safeHandle('deps:versions', getComponentVersions);
+  safeHandle('deps:update-yt-dlp', (_event, force) => updateYtDlp(Boolean(force)));
+  safeHandle('media:inspect', inspectMedia);
+  safeHandle('settings:get', () => readJsonState('settings.json', {}));
+  safeHandle('settings:set', (_event, settings) => writeJsonState('settings.json', settings && typeof settings === 'object' ? settings : {}));
+  safeHandle('history:get', () => readJsonState('history.json', []));
+  safeHandle('history:set', (_event, history) => writeJsonState('history.json', Array.isArray(history) ? history.slice(0, 200) : []));
   safeHandle('download:start', startDownload);
   safeHandle('download:cancel', cancelDownload);
   safeHandle('update:check', checkForUpdates);
@@ -569,6 +730,14 @@ app.whenReady().then(() => {
     }
     const result = await shell.openPath(resolved);
     return result || null;
+  });
+  safeHandle('update:install-on-quit', async (_event, filePath) => {
+    const dirs = getDownloadDirs();
+    const resolved = path.resolve(String(filePath || ''));
+    if (path.dirname(resolved) !== path.resolve(dirs.updates) || path.extname(resolved).toLowerCase() !== '.exe') throw new Error('Arquivo de atualização inválido.');
+    await fsp.access(resolved);
+    pendingUpdateInstaller = resolved;
+    return true;
   });
   safeHandle('folder:open', async (_event, kind) => {
     const dirs = await ensureDownloadDirs();
@@ -590,6 +759,10 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   for (const { child } of activeDownloads.values()) {
     try { child.kill(); } catch (_) {}
+  }
+  if (pendingUpdateInstaller && !openingPendingInstaller) {
+    openingPendingInstaller = true;
+    spawn(pendingUpdateInstaller, [], { detached: true, windowsHide: false, stdio: 'ignore' }).unref();
   }
 });
 
